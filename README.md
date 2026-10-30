@@ -1,54 +1,28 @@
-# Sara AI — Offline Marriage Bureau Agent v2.0
+# Sara AI — Offline Marriage Bureau Agent v2.1
 
 Package: `com.saraai.offline`
 
-Fully offline Android Marriage Bureau AI assistant.
+Native Kotlin + Compose + llama.cpp (CPU, ARM64) + optional cloud AI providers.
 
-- Local GGUF via llama.cpp (CPU, ARM64 only)
-- WhatsApp + WhatsApp Business auto-reply via NotificationListenerService + RemoteInput
-- Owner knowledge (TXT/PDF/CSV/JSON/DOCX) + structured marriage profiles
-- Owner instructions that actually shape the LLM prompt
-- Customer messages are **never** stored permanently
-- No cloud AI, no OpenAI/Gemini, no analytics
-
-## Target device
-
-Redmi 12 5G · 6 GB RAM · ARM64 · Android 13–15
-
-Recommended model: **Qwen2.5-0.5B-Instruct Q4_K_M** (~491 MB) — downloadable in-app from Hugging Face.
-
-## Screens
-
-| Tab | Purpose |
-|-----|---------|
-| Home | Status dashboard (model, auto-reply, knowledge counts) |
-| Chat | Real local-LLM test console (same pipeline as WA replies) |
-| Apps | Dynamic messaging-app scan (WA / WA Business / Telegram / …) |
-| Knowledge | Manual entry, paste, PDF/TXT/CSV/JSON/DOCX import, instructions, What Sara Knows |
-| Models | Catalog + real DownloadManager download + load/unload |
-| Settings | Master switch, groups, privacy notice, diagnostics |
-
-## Privacy
-
-Customer chat text exists only in memory while generating a reply. It is never written to Room or exported.
+## Highlights
+- **Crash-safe Models screen** (fixed DownloadManager `file://` private path crash)
+- Real HTTP model download with % / MB / speed / pause / cancel / GGUF validation
+- RAM-aware catalog including Qwen2.5 0.5B–3B, Llama 3.2 1B, **LFM2.5 2.6B**, **LFM2.5-VL 3B**
+- AI providers: Local, Google Gemini, NVIDIA NIM, OpenAI-compatible
+- API keys: Android Keystore AES-GCM (never logged / never full display)
+- Chat + WhatsApp auto-reply share the same provider pipeline
+- Customer messages never persisted as knowledge
 
 ## Build
-
 ```bash
-git clone --depth 1 --branch b3962 https://github.com/ggml-org/llama.cpp.git third_party/llama.cpp
 ./gradlew :bureau-core:test :app:assembleDebug
 ```
 
-GitHub Actions uploads `sara-ai-offline-debug-apk` on every push to `main`.
+## Install (Hindi)
+1. Debug APK install karein
+2. Notification access ON karein
+3. Models → recommended Qwen 0.5B Q4 download → Load
+4. Settings → AI mode Local (offline) ya API
+5. Master Auto Reply ON
 
-## Hindi install (device)
-
-1. APK install karein
-2. Notification access ON karein (Settings → Sara AI)
-3. Models tab → recommended Qwen download → Load
-4. Knowledge / Instructions add karein
-5. Chat se test karein
-6. Apps → WhatsApp / WA Business Auto Reply ON
-7. Dusre phone se message bhejkar auto-reply verify karein
-
-See `DEVICE_TEST_CHECKLIST.md` and `KNOWN_LIMITATIONS.md`.
+See DEVICE_TEST_CHECKLIST.md and KNOWN_LIMITATIONS.md.
