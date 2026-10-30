@@ -19,12 +19,6 @@ import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Production model downloader.
- * Primary: coroutine HTTP into app-private models/ (safe on all API levels).
- * Never uses Uri.fromFile on private filesDir with DownloadManager — that causes
- * IllegalArgumentException / crash on Android 10+ when opening Models / starting download.
- */
 object ModelDownloader {
 
     data class Progress(
@@ -35,11 +29,15 @@ object ModelDownloader {
         val speedBps: Long = 0,
         val message: String = "",
         val error: String = "",
+        val reason: Int = 0,
     ) {
         val percent: Int
             get() = if (total > 0) ((downloaded * 100) / total).toInt().coerceIn(0, 100) else 0
         val etaSec: Long
             get() = if (speedBps > 0 && total > downloaded) (total - downloaded) / speedBps else -1
+        val done: Boolean get() = status == Status.Success
+        val failed: Boolean get() = status == Status.Failed
+        val running: Boolean get() = status == Status.Running || status == Status.Paused
     }
 
     enum class Status { Idle, Running, Paused, Success, Failed, Cancelled }
@@ -67,17 +65,18 @@ object ModelDownloader {
         }
     }
 
+    /** Compat: safe DM into externalFilesDir (never private file://). */
+    fun start(context: Context, spec: ModelSpec): Long = startDownloadManager(context, spec)
+
+    fun queryProgress(context: Context, id: Long): Progress? = queryDmProgress(context, id)
+
     fun availableBytes(context: Context): Long = try {
         modelsDir(context).usableSpace
-    } catch (_: Throwable) {
-        0L
-    }
+    } catch (_: Throwable) { 0L }
 
     fun diskUsageBytes(context: Context): Long = try {
         modelsDir(context).listFiles()?.sumOf { it.length() } ?: 0L
-    } catch (_: Throwable) {
-        0L
-    }
+    } catch (_: Throwable) { 0L }
 
     suspend fun downloadHttp(context: Context, spec: ModelSpec): Progress = withContext(Dispatchers.IO) {
         val dest = localPath(context, spec)
@@ -97,32 +96,21 @@ object ModelDownloader {
             _progress.value = p
             return@withContext p
         }
-
         val cancel = AtomicBoolean(false)
         val pause = AtomicBoolean(false)
         cancelFlags[spec.id] = cancel
         pauseFlags[spec.id] = pause
-
         try {
             val conn = (URL(spec.url).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 30_000
-                readTimeout = 60_000
-                instanceFollowRedirects = true
-                requestMethod = "GET"
-                setRequestProperty("User-Agent", "SaraAI-Offline/2.0")
+                connectTimeout = 30_000; readTimeout = 60_000; instanceFollowRedirects = true
+                requestMethod = "GET"; setRequestProperty("User-Agent", "SaraAI-Offline/2.1")
             }
-            val code = conn.responseCode
-            if (code !in 200..299) {
-                val p = Progress(spec.id, Status.Failed, error = "HTTP $code")
-                _progress.value = p
-                return@withContext p
+            if (conn.responseCode !in 200..299) {
+                val p = Progress(spec.id, Status.Failed, error = "HTTP ${conn.responseCode}")
+                _progress.value = p; return@withContext p
             }
             val total = conn.contentLengthLong.coerceAtLeast(0)
-            var downloaded = 0L
-            var lastTs = System.currentTimeMillis()
-            var lastBytes = 0L
-            var speed = 0L
-
+            var downloaded = 0L; var lastTs = System.currentTimeMillis(); var lastBytes = 0L; var speed = 0L
             partial.parentFile?.mkdirs()
             conn.inputStream.use { input ->
                 FileOutputStream(partial).use { out ->
@@ -132,28 +120,21 @@ object ModelDownloader {
                         if (cancel.get()) {
                             partial.delete()
                             val p = Progress(spec.id, Status.Cancelled, downloaded, total, speed, "Cancelled")
-                            _progress.value = p
-                            return@withContext p
+                            _progress.value = p; return@withContext p
                         }
                         while (pause.get() && !cancel.get()) {
                             _progress.value = Progress(spec.id, Status.Paused, downloaded, total, 0, "Paused")
-                            Thread.sleep(200)
-                            currentCoroutineContext().ensureActive()
+                            Thread.sleep(200); currentCoroutineContext().ensureActive()
                         }
-                        val n = input.read(buf)
-                        if (n <= 0) break
-                        out.write(buf, 0, n)
-                        downloaded += n
+                        val n = input.read(buf); if (n <= 0) break
+                        out.write(buf, 0, n); downloaded += n
                         val now = System.currentTimeMillis()
                         if (now - lastTs >= 400) {
                             val dt = (now - lastTs).coerceAtLeast(1)
                             speed = ((downloaded - lastBytes) * 1000) / dt
-                            lastTs = now
-                            lastBytes = downloaded
-                            _progress.value = Progress(
-                                spec.id, Status.Running, downloaded, total, speed,
-                                message = "${if (total > 0) ((downloaded * 100) / total).toInt() else 0}%",
-                            )
+                            lastTs = now; lastBytes = downloaded
+                            _progress.value = Progress(spec.id, Status.Running, downloaded, total, speed,
+                                message = "${if (total > 0) ((downloaded * 100) / total).toInt() else 0}%")
                         }
                     }
                     out.flush()
@@ -162,56 +143,36 @@ object ModelDownloader {
             if (cancel.get()) {
                 partial.delete()
                 val p = Progress(spec.id, Status.Cancelled, downloaded, total, 0, "Cancelled")
-                _progress.value = p
-                return@withContext p
+                _progress.value = p; return@withContext p
             }
             if (dest.exists()) dest.delete()
-            if (!partial.renameTo(dest)) {
-                partial.copyTo(dest, overwrite = true)
-                partial.delete()
-            }
+            if (!partial.renameTo(dest)) { partial.copyTo(dest, overwrite = true); partial.delete() }
             val v = GgufValidator.validate(dest, expectedSha256 = spec.sha256)
             if (!v.ok) {
                 dest.delete()
                 val p = Progress(spec.id, Status.Failed, downloaded, total, 0, error = "Invalid GGUF: ${v.reason}")
-                _progress.value = p
-                return@withContext p
+                _progress.value = p; return@withContext p
             }
             val p = Progress(spec.id, Status.Success, dest.length(), dest.length(), 0, "Download complete")
-            _progress.value = p
-            p
+            _progress.value = p; p
         } catch (t: Throwable) {
             try { partial.delete() } catch (_: Throwable) {}
             val p = Progress(spec.id, Status.Failed, error = t.message ?: "Download error")
-            _progress.value = p
-            p
+            _progress.value = p; p
         } finally {
-            cancelFlags.remove(spec.id)
-            pauseFlags.remove(spec.id)
+            cancelFlags.remove(spec.id); pauseFlags.remove(spec.id)
         }
     }
 
-    fun cancel(modelId: String) {
-        cancelFlags[modelId]?.set(true)
-    }
+    fun cancel(modelId: String) { cancelFlags[modelId]?.set(true) }
+    fun pause(modelId: String) { pauseFlags[modelId]?.set(true) }
+    fun resume(modelId: String) { pauseFlags[modelId]?.set(false) }
 
-    fun pause(modelId: String) {
-        pauseFlags[modelId]?.set(true)
-    }
-
-    fun resume(modelId: String) {
-        pauseFlags[modelId]?.set(false)
-    }
-
-    fun delete(context: Context, spec: ModelSpec): Boolean {
-        return try {
-            val f = localPath(context, spec)
-            File(f.parentFile, f.name + ".part").delete()
-            if (f.exists()) f.delete() else true
-        } catch (_: Throwable) {
-            false
-        }
-    }
+    fun delete(context: Context, spec: ModelSpec): Boolean = try {
+        val f = localPath(context, spec)
+        File(f.parentFile, f.name + ".part").delete()
+        if (f.exists()) f.delete() else true
+    } catch (_: Throwable) { false }
 
     fun startDownloadManager(context: Context, spec: ModelSpec): Long {
         return try {
@@ -250,31 +211,10 @@ object ModelDownloader {
                     DownloadManager.STATUS_RUNNING, DownloadManager.STATUS_PENDING -> Status.Running
                     else -> Status.Idle
                 }
-                Progress(
-                    status = st,
-                    downloaded = downloaded,
-                    total = total,
+                Progress(status = st, downloaded = downloaded, total = total, reason = reason,
                     message = if (st == Status.Failed) "DM fail reason=$reason" else "",
-                    error = if (st == Status.Failed) "reason=$reason" else "",
-                )
+                    error = if (st == Status.Failed) "reason=$reason" else "")
             }
-        } catch (_: Throwable) {
-            null
-        }
-    }
-
-    fun importFromExternal(context: Context, spec: ModelSpec): Boolean {
-        return try {
-            val ext = File(
-                context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return false,
-                spec.fileName,
-            )
-            if (!ext.exists()) return false
-            val dest = localPath(context, spec)
-            ext.copyTo(dest, overwrite = true)
-            GgufValidator.validate(dest, expectedSha256 = spec.sha256).ok
-        } catch (_: Throwable) {
-            false
-        }
+        } catch (_: Throwable) { null }
     }
 }
