@@ -13,6 +13,7 @@ import com.saraai.offline.core.dedupeKey
 import com.saraai.offline.core.retrievalContext
 import com.saraai.offline.core.skipReason
 import com.saraai.offline.data.BureauDb
+import com.saraai.offline.data.PrefsStore
 import com.saraai.offline.llm.LlamaBridge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
