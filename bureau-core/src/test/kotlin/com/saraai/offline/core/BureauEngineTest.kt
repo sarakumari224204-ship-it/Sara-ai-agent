@@ -118,7 +118,7 @@ class BureauEngineTest {
     }
 
     @Test fun jsonProfiles() {
-        val json = """[{\"name\":\"Pooja\",\"age\":27,\"city\":\"Noida\",\"gender\":\"female\"}]"""
+        val json = "{ \"name\": \"Pooja\", \"age\": 27, \"city\": \"Noida\", \"gender\": \"female\" }"
         val ps = parseJsonProfiles(json)
         assertTrue(ps.isNotEmpty())
         assertEquals("Pooja", ps[0].name)
