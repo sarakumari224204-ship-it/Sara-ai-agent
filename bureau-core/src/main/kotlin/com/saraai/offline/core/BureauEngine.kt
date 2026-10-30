@@ -95,6 +95,44 @@ fun skipReason(text: String, seen: Set<String>, key: String, ownMark: String): S
     return null
 }
 
+val KNOWN_MESSAGING = setOf("com.whatsapp", "com.whatsapp.w4b")
+
+fun shouldSkipPackage(pkg: String, enabled: Set<String>): Boolean {
+    if (enabled.isEmpty()) return true
+    return pkg !in enabled
+}
+
+fun isGroupNotification(
+    pkg: String,
+    title: String,
+    body: String,
+    extrasKeys: Map<String, Any?> = emptyMap(),
+): Boolean {
+    if (pkg !in KNOWN_MESSAGING) {
+        return extrasKeys["android.isGroupConversation"] == true ||
+            extrasKeys["android.isGroupConversation"] == "true"
+    }
+    if (extrasKeys["android.isGroupConversation"] == true ||
+        extrasKeys["android.isGroupConversation"] == "true"
+    ) {
+        return true
+    }
+    val t = title.trim()
+    if (t.count { it == ',' } >= 2) return true
+    if (Regex("\\b(group|grp|family|team)\\b", RegexOption.IGNORE_CASE).containsMatchIn(t) &&
+        !Regex("\\b(you|tum|aap)\\b", RegexOption.IGNORE_CASE).containsMatchIn(t)
+    ) {
+        if (Regex("^[^:]{2,40}:\\s+.+").containsMatchIn(body)) return true
+    }
+    if (Regex("^[\\p{L}\\p{N} ._-]{2,40}:\\s+\\S").containsMatchIn(body) &&
+        t.isNotBlank() &&
+        !body.startsWith(t)
+    ) {
+        return true
+    }
+    return false
+}
+
 fun parseCsv(raw: String): String {
     val lines = raw.lines().filter { it.isNotBlank() }
     if (lines.size < 2) return raw
