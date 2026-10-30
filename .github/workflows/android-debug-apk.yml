@@ -13,12 +13,22 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
-      - name: SDK packages
+      - name: Install Android SDK
         run: |
-          sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
-          yes | sdkmanager --licenses || true
+          sudo apt-get update
+          sudo apt-get install -y wget unzip
+          mkdir -p "$HOME/android-sdk/cmdline-tools"
+          cd /tmp
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q commandlinetools-linux-11076708_latest.zip
+          rm -rf "$HOME/android-sdk/cmdline-tools/latest"
+          mkdir -p "$HOME/android-sdk/cmdline-tools/latest"
+          mv cmdline-tools/* "$HOME/android-sdk/cmdline-tools/latest/"
+          echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          yes | "$HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$HOME/android-sdk" --licenses || true
+          "$HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$HOME/android-sdk" "platforms;android-35" "build-tools;35.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
+          echo "sdk.dir=$HOME/android-sdk" > "$GITHUB_WORKSPACE/local.properties"
       - name: Pin llama.cpp
         run: git clone --depth 1 --branch b3962 https://github.com/ggml-org/llama.cpp.git third_party/llama.cpp
       - name: Unit tests
