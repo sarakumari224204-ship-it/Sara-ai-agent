@@ -3,17 +3,25 @@ package com.saraai.offline.llm
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Thin JNI bridge to llama.cpp (CPU only).
- * One model at a time. Load/generate must never run on main thread.
- */
 object LlamaBridge {
     var available: Boolean = false
         private set
     var lastError: String = ""
         private set
-    /** Hindi-friendly status for UI */
     var lastStatusHi: String = ""
+        private set
+
+    data class Metrics(
+        val promptTokens: Int = 0,
+        val genTokens: Int = 0,
+        val promptMs: Long = 0,
+        val genMs: Long = 0,
+        val ttftMs: Long = 0,
+        val loadMs: Long = 0,
+        val tokensPerSec: Double = 0.0,
+    )
+
+    @Volatile var lastMetrics: Metrics = Metrics()
         private set
 
     private val loadLock = Any()
@@ -35,7 +43,7 @@ object LlamaBridge {
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
         return requested.coerceIn(1, minOf(4, cores))
     }
-    fun safeMaxTokens(requested: Int): Int = requested.coerceIn(16, 256)
+    fun safeMaxTokens(requested: Int): Int = requested.coerceIn(8, 256)
 
     fun load(path: String, nCtx: Int, threads: Int): String {
         if (!available) {
@@ -65,7 +73,7 @@ object LlamaBridge {
                     val sig = String(magic, Charsets.US_ASCII)
                     if (sig != "GGUF") {
                         lastError = "not gguf"
-                        lastStatusHi = "Yeh GGUF file nahi hai (magic=$sig). LFM 2.5 / V3B GGUF import karein."
+                        lastStatusHi = "Yeh GGUF file nahi hai (magic=$sig)."
                         return lastError
                     }
                 }
@@ -75,18 +83,17 @@ object LlamaBridge {
             lastStatusHi = "Model file padhne mein error: $lastError"
             return lastError
         }
-
         val ctx = safeCtx(nCtx)
         val th = safeThreads(threads)
         synchronized(loadLock) {
             return try {
-                if (nativeLoaded()) {
-                    nativeUnload()
-                }
+                if (nativeLoaded()) nativeUnload()
                 val result = nativeLoad(path, ctx, th)
                 if (result == "ok") {
                     lastError = ""
-                    lastStatusHi = "Model load ho gaya (ctx=$ctx, threads=$th)."
+                    val loadMs = try { nativeLoadMs() } catch (_: Throwable) { 0L }
+                    lastMetrics = lastMetrics.copy(loadMs = loadMs)
+                    lastStatusHi = "Model load ho gaya (ctx=$ctx, threads=$th, ${loadMs}ms)."
                 } else {
                     lastError = result
                     lastStatusHi = when {
@@ -111,15 +118,28 @@ object LlamaBridge {
         }
     }
 
-    fun generate(prompt: String, maxTokens: Int): String {
+    fun generate(prompt: String, maxTokens: Int): String =
+        generateEx(prompt, maxTokens, 0.6f, 40, 0.9f)
+
+    fun generateEx(
+        prompt: String,
+        maxTokens: Int,
+        temperature: Float = 0.6f,
+        topK: Int = 40,
+        topP: Float = 0.9f,
+    ): String {
         if (!available || !nativeLoaded()) return ""
-        if (!generating.compareAndSet(false, true)) {
-            return ""
-        }
+        if (!generating.compareAndSet(false, true)) return ""
         return try {
             synchronized(loadLock) {
                 if (!nativeLoaded()) return ""
-                nativeGenerate(prompt, safeMaxTokens(maxTokens))
+                val out = try {
+                    nativeGenerateEx(prompt, safeMaxTokens(maxTokens), temperature, topK, topP)
+                } catch (_: UnsatisfiedLinkError) {
+                    nativeGenerate(prompt, safeMaxTokens(maxTokens))
+                }
+                refreshMetrics()
+                out
             }
         } catch (_: OutOfMemoryError) {
             lastError = "OutOfMemoryError"
@@ -133,6 +153,23 @@ object LlamaBridge {
         }
     }
 
+    private fun refreshMetrics() {
+        try {
+            val genMs = nativeLastGenMs()
+            val genTok = nativeLastGenTokens()
+            val tps = if (genMs > 0 && genTok > 0) genTok * 1000.0 / genMs else 0.0
+            lastMetrics = Metrics(
+                promptTokens = nativeLastPromptTokens(),
+                genTokens = genTok,
+                promptMs = nativeLastPromptMs(),
+                genMs = genMs,
+                ttftMs = nativeLastTtftMs(),
+                loadMs = nativeLoadMs(),
+                tokensPerSec = tps,
+            )
+        } catch (_: Throwable) {}
+    }
+
     fun unload() {
         synchronized(loadLock) {
             if (available) {
@@ -142,18 +179,31 @@ object LlamaBridge {
         }
     }
 
-    fun loaded(): Boolean = available && nativeLoaded()
+    fun loaded(): Boolean = try {
+        available && nativeLoaded()
+    } catch (_: Throwable) {
+        false
+    }
 
     fun tryReload(path: String, nCtx: Int, threads: Int): String {
         if (path.isBlank()) {
-            lastStatusHi = "Koi saved model path nahi hai."
-            return "no path"
+            lastStatusHi = "Saved model path khali hai."
+            return "empty path"
         }
         return load(path, nCtx, threads)
     }
 
     private external fun nativeLoad(path: String, nCtx: Int, threads: Int): String
     private external fun nativeGenerate(prompt: String, maxTokens: Int): String
+    private external fun nativeGenerateEx(
+        prompt: String, maxTokens: Int, temperature: Float, topK: Int, topP: Float,
+    ): String
     private external fun nativeUnload()
     private external fun nativeLoaded(): Boolean
+    private external fun nativeLastPromptMs(): Long
+    private external fun nativeLastGenMs(): Long
+    private external fun nativeLastPromptTokens(): Int
+    private external fun nativeLastGenTokens(): Int
+    private external fun nativeLastTtftMs(): Long
+    private external fun nativeLoadMs(): Long
 }
