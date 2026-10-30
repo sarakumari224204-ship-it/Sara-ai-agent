@@ -13,7 +13,7 @@ private val Context.dataStore by preferencesDataStore("sara_prefs")
 
 data class RuntimePrefs(
     val master: Boolean = false,
-    val enabledPackages: Set<String> = setOf("com.whatsapp"),
+    val enabledPackages: Set<String> = setOf("com.whatsapp", "com.whatsapp.w4b"),
     val language: String = "hi",
     val length: String = "short",
     val emoji: Boolean = false,
@@ -42,7 +42,7 @@ object PrefsStore {
         val p = context.dataStore.data.first()
         return RuntimePrefs(
             master = p[master] ?: false,
-            enabledPackages = p[pkgs] ?: setOf("com.whatsapp"),
+            enabledPackages = p[pkgs] ?: setOf("com.whatsapp", "com.whatsapp.w4b"),
             language = p[language] ?: "hi",
             length = p[length] ?: "short",
             emoji = p[emoji] ?: false,
