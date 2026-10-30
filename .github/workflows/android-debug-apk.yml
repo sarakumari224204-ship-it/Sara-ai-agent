@@ -1,0 +1,32 @@
+name: Android debug APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+      - name: SDK packages
+        run: |
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
+          yes | sdkmanager --licenses || true
+      - name: Pin llama.cpp
+        run: git clone --depth 1 --branch b3962 https://github.com/ggml-org/llama.cpp.git third_party/llama.cpp
+      - name: Unit tests
+        run: chmod +x gradlew && ./gradlew :bureau-core:test --stacktrace
+      - name: Debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sara-ai-offline-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
