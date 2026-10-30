@@ -3,28 +3,32 @@ package com.saraai.offline.model
 data class ModelSpec(
     val id: String,
     val name: String,
-    val family: String,
-    val params: String,
+    val family: String = "",
+    val params: String = "",
     val quant: String,
     val sizeMb: Int,
-    val minRamGb: Int,
-    val recommendedRamGb: Int,
-    val hindiOk: Boolean,
-    val hinglishOk: Boolean,
-    val englishOk: Boolean,
-    val recommended: Boolean,
+    val minRamGb: Int = 4,
+    val recommendedRamGb: Int = 6,
+    val hindiOk: Boolean = true,
+    val hinglishOk: Boolean = true,
+    val englishOk: Boolean = true,
+    val recommended: Boolean = false,
     val url: String,
     val fileName: String,
     val sha256: String? = null,
     val contextHint: Int = 1024,
     val note: String = "",
-)
+) {
+    /** Compat for older UI binding to ramNote */
+    val ramNote: String
+        get() = note.ifBlank { "RAM min ${minRamGb} GB · recommended ${recommendedRamGb} GB" }
+}
 
 object ModelCatalog {
     val models: List<ModelSpec> = listOf(
         ModelSpec("qwen25-05b-q4km", "Qwen2.5 0.5B Instruct", "Qwen2.5", "0.5B", "Q4_K_M", 491, 4, 4, true, true, true, true,
             "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
-            "qwen2.5-0.5b-instruct-q4_k_m.gguf", contextHint = 1024, note = "Best for 4–6 GB devices"),
+            "qwen2.5-0.5b-instruct-q4_k_m.gguf", note = "Best for 4–6 GB devices"),
         ModelSpec("qwen25-05b-q8", "Qwen2.5 0.5B Instruct", "Qwen2.5", "0.5B", "Q8_0", 665, 4, 6, true, true, true, false,
             "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q8_0.gguf",
             "qwen2.5-0.5b-instruct-q8_0.gguf"),
@@ -72,18 +76,11 @@ object ModelCatalog {
     }
 
     private fun quantRank(q: String): Int = when {
-        q.contains("Q8") -> 8
-        q.contains("Q6") -> 6
-        q.contains("Q5") -> 5
-        q.contains("Q4") -> 4
-        q.contains("Q3") -> 3
-        else -> 0
+        q.contains("Q8") -> 8; q.contains("Q6") -> 6; q.contains("Q5") -> 5; q.contains("Q4") -> 4; q.contains("Q3") -> 3; else -> 0
     }
 
-    fun recommendForRam(deviceRamGb: Int): ModelSpec {
-        return models.filter { it.minRamGb <= deviceRamGb && it.recommended }
-            .minByOrNull { it.sizeMb }
+    fun recommendForRam(deviceRamGb: Int): ModelSpec =
+        models.filter { it.minRamGb <= deviceRamGb && it.recommended }.minByOrNull { it.sizeMb }
             ?: models.filter { it.minRamGb <= deviceRamGb }.minByOrNull { it.sizeMb }
             ?: models.first()
-    }
 }
