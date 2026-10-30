@@ -1,11 +1,7 @@
-# Known Limitations — Sara AI v2.1
+# Known limitations (v2.1)
 
-- CI: unit tests + APK only; device for GGUF/WA/API
-- Keyword retrieval (no embeddings)
-- LFM2.5-VL is vision model; text path only in-app
-- 3B on 6GB needs low n_ctx; may OOM with clear error
-- Download: HTTP to app-private models/ (not broken file:// DM)
-- API keys: Keystore AES-GCM; never logged
-- Gemini: generativelanguage.googleapis.com v1beta
-- NIM: OpenAI-compatible integrate.api.nvidia.com/v1 default
-- API WhatsApp auto-reply requires explicit confirmation
+- Live cloud API calls require valid user-supplied keys; CI has no credentials.
+- Local GGUF speed depends on device RAM/CPU; 6GB phones should prefer ≤1–1.5B Q4 models.
+- WhatsApp reply uses notification RemoteInput; UI changes in WhatsApp may break reply actions.
+- Cloud providers process the full prompt on their servers when selected.
+- No automatic fallback from cloud to Local unless user switches provider.
