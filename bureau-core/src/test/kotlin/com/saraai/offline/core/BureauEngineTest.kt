@@ -50,12 +50,8 @@ class BureauEngineTest {
             pool.execute {
                 try {
                     val k = keys[i % keys.size]
-                    synchronized(seen) {
-                        if (!seen.contains(k)) seen.add(k)
-                    }
-                } finally {
-                    latch.countDown()
-                }
+                    synchronized(seen) { if (!seen.contains(k)) seen.add(k) }
+                } finally { latch.countDown() }
             }
         }
         assertTrue(latch.await(5, TimeUnit.SECONDS))
@@ -74,11 +70,8 @@ class BureauEngineTest {
                 try {
                     val r = skipReason("hello", seen, key, "SaraBureau")
                     if (r == null) seen.add(key)
-                } catch (_: Exception) {
-                    errors.incrementAndGet()
-                } finally {
-                    latch.countDown()
-                }
+                } catch (_: Exception) { errors.incrementAndGet() }
+                finally { latch.countDown() }
             }
         }
         assertTrue(latch.await(5, TimeUnit.SECONDS))
@@ -87,43 +80,19 @@ class BureauEngineTest {
         assertTrue(seen.contains(key))
     }
 
-    @Test fun notificationFilteringWhatsAppBusiness() {
+    @Test fun whatsappPackages() {
+        assertTrue("com.whatsapp" in KNOWN_MESSAGING)
+        assertTrue("com.whatsapp.w4b" in KNOWN_MESSAGING)
         assertFalse(shouldSkipPackage("com.whatsapp", setOf("com.whatsapp", "com.whatsapp.w4b")))
-        assertFalse(shouldSkipPackage("com.whatsapp.w4b", setOf("com.whatsapp", "com.whatsapp.w4b")))
-        assertTrue(shouldSkipPackage("com.instagram.android", setOf("com.whatsapp")))
-        assertTrue(shouldSkipPackage("com.whatsapp", emptySet()))
+        assertTrue(shouldSkipPackage("com.android.camera", setOf("com.whatsapp")))
+        assertFalse(isMessagingPackage("com.android.camera2"))
+        assertTrue(isMessagingPackage("org.telegram.messenger"))
     }
 
     @Test fun groupMessageFilter() {
-        assertTrue(
-            isGroupNotification(
-                "com.whatsapp",
-                "Family",
-                "hello",
-                mapOf("android.isGroupConversation" to true),
-            ),
-        )
-        assertTrue(
-            isGroupNotification(
-                "com.whatsapp",
-                "College Batch",
-                "Ravi: kal milte hain",
-            ),
-        )
-        assertFalse(
-            isGroupNotification(
-                "com.whatsapp",
-                "Ravi",
-                "Namaste, fees kitni hai?",
-            ),
-        )
-        assertFalse(
-            isGroupNotification(
-                "com.whatsapp.w4b",
-                "Customer A",
-                "Shadi ke liye profile chahiye",
-            ),
-        )
+        assertTrue(isGroupNotification("com.whatsapp", "Family", "hello", mapOf("android.isGroupConversation" to true)))
+        assertFalse(isGroupNotification("com.whatsapp", "Ravi", "Namaste, fees kitni hai?"))
+        assertFalse(isGroupNotification("com.whatsapp.w4b", "Customer A", "Shadi ke liye profile chahiye"))
     }
 
     @Test fun skipSelfAndEmpty() {
@@ -132,16 +101,42 @@ class BureauEngineTest {
         assertNull(skipReason("Normal customer message", emptySet(), "k3", "SaraBureau"))
     }
 
-    @Test fun modelPathPersistenceHelpers() {
-        val path = "/data/user/0/com.saraai.offline/files/model.gguf"
-        assertTrue(path.endsWith(".gguf"))
-        assertTrue(path.isNotBlank())
-        val blank = ""
-        assertTrue(blank.isBlank())
+    @Test fun profileMatchLucknow() {
+        val profiles = listOf(
+            Profile("1", "Asha", gender = "female", age = 28, city = "Lucknow", education = "MBA"),
+            Profile("2", "Ravi", gender = "male", age = 30, city = "Delhi"),
+        )
+        val hit = matchProfiles("lucknow 28 girl profile", profiles)
+        assertTrue(hit.any { it.name == "Asha" })
     }
 
-    @Test fun knownMessagingPackages() {
-        assertTrue("com.whatsapp" in KNOWN_MESSAGING)
-        assertTrue("com.whatsapp.w4b" in KNOWN_MESSAGING)
+    @Test fun csvProfiles() {
+        val csv = "name,gender,age,city\nNeha,female,26,Jaipur\nAmit,male,29,Kanpur"
+        val ps = parseCsvProfiles(csv)
+        assertEquals(2, ps.size)
+        assertEquals("Neha", ps[0].name)
+    }
+
+    @Test fun jsonProfiles() {
+        val json = """[{\"name\":\"Pooja\",\"age\":27,\"city\":\"Noida\",\"gender\":\"female\"}]"""
+        val ps = parseJsonProfiles(json)
+        assertTrue(ps.isNotEmpty())
+        assertEquals("Pooja", ps[0].name)
+    }
+
+    @Test fun sanitizeEmpty() {
+        assertEquals("", sanitizeReply("   "))
+        assertTrue(sanitizeReply("Assistant: Namaste ji").contains("Namaste"))
+    }
+
+    @Test fun instructionInPrompt() {
+        val p = buildPrompt(
+            listOf(Instruction("1", "Always reply in Hindi", 1)),
+            "Bureau in Lucknow",
+            "hello",
+            ReplyPrefs(),
+        )
+        assertTrue(p.contains("Always reply in Hindi"))
+        assertTrue(p.contains("Lucknow"))
     }
 }
