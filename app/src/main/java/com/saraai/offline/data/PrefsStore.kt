@@ -23,6 +23,10 @@ data class RuntimePrefs(
     val maxTokens: Int = 120,
     val nCtx: Int = 1024,
     val modelPath: String = "",
+    val modelName: String = "",
+    val threads: Int = 4,
+    val allowGroups: Boolean = false,
+    val darkTheme: Boolean = true,
 )
 
 object PrefsStore {
@@ -37,6 +41,10 @@ object PrefsStore {
     private val maxTokens = intPreferencesKey("max")
     private val nCtx = intPreferencesKey("nctx")
     private val model = stringPreferencesKey("model")
+    private val modelName = stringPreferencesKey("model_name")
+    private val threads = intPreferencesKey("threads")
+    private val allowGroups = booleanPreferencesKey("allow_groups")
+    private val darkTheme = booleanPreferencesKey("dark")
 
     suspend fun read(context: Context): RuntimePrefs {
         val p = context.dataStore.data.first()
@@ -52,6 +60,10 @@ object PrefsStore {
             maxTokens = p[maxTokens] ?: 120,
             nCtx = p[nCtx] ?: 1024,
             modelPath = p[model] ?: "",
+            modelName = p[modelName] ?: "",
+            threads = p[threads] ?: 4,
+            allowGroups = p[allowGroups] ?: false,
+            darkTheme = p[darkTheme] ?: true,
         )
     }
 
@@ -70,6 +82,10 @@ object PrefsStore {
             it[maxTokens] = next.maxTokens
             it[nCtx] = next.nCtx
             it[model] = next.modelPath
+            it[modelName] = next.modelName
+            it[threads] = next.threads
+            it[allowGroups] = next.allowGroups
+            it[darkTheme] = next.darkTheme
         }
     }
 }
