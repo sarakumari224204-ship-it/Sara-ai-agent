@@ -4,7 +4,7 @@ on:
   push:
     branches: [fix/settings-models-controls]
     paths:
-      - 'patches/append/**'
+      - 'patches/apb/**'
       - '.github/workflows/apply-settings-models-patch.yml'
 jobs:
   apply:
@@ -16,10 +16,15 @@ jobs:
         with:
           ref: fix/settings-models-controls
           fetch-depth: 0
-      - name: Assemble patch and apply safely
+      - name: Decode parts and apply patch safely
         run: |
           set -euo pipefail
-          cat patches/append/00.txt patches/append/01.txt patches/append/02.txt patches/append/03.txt patches/append/04.txt patches/append/05.txt patches/append/06.txt patches/append/07.txt patches/append/08.txt patches/append/09.txt patches/append/10.txt patches/append/11.txt > /tmp/new-ma.patch
+          : > /tmp/new-ma.patch
+          for i in 00 01 02 03 04 05 06 07 08 09 10 11; do
+            f="patches/apb/part$i.b64"
+            test -f "$f"
+            base64 -d "$f" >> /tmp/new-ma.patch
+          done
           wc -c /tmp/new-ma.patch
           head -8 /tmp/new-ma.patch
           if git apply --check /tmp/new-ma.patch; then
