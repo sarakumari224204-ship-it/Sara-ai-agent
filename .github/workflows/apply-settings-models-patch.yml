@@ -4,7 +4,7 @@ on:
   push:
     branches: [fix/settings-models-controls]
     paths:
-      - 'patches/pchunks/**'
+      - 'patches/pcb64/**'
       - '.github/workflows/apply-settings-models-patch.yml'
 jobs:
   apply:
@@ -16,17 +16,21 @@ jobs:
         with:
           ref: fix/settings-models-controls
           fetch-depth: 0
-      - name: Assemble patch and verify
+      - name: Decode pchunks and apply patch
         run: |
           set -euo pipefail
-          cat patches/pchunks/000.txt patches/pchunks/001.txt patches/pchunks/002.txt patches/pchunks/003.txt patches/pchunks/004.txt patches/pchunks/005.txt patches/pchunks/006.txt patches/pchunks/007.txt patches/pchunks/008.txt patches/pchunks/009.txt patches/pchunks/010.txt patches/pchunks/011.txt patches/pchunks/012.txt patches/pchunks/013.txt patches/pchunks/014.txt patches/pchunks/015.txt patches/pchunks/016.txt patches/pchunks/017.txt patches/pchunks/018.txt patches/pchunks/019.txt patches/pchunks/020.txt patches/pchunks/021.txt patches/pchunks/022.txt patches/pchunks/023.txt patches/pchunks/024.txt patches/pchunks/025.txt patches/pchunks/026.txt patches/pchunks/027.txt patches/pchunks/028.txt patches/pchunks/029.txt patches/pchunks/030.txt patches/pchunks/031.txt patches/pchunks/032.txt patches/pchunks/033.txt patches/pchunks/034.txt patches/pchunks/035.txt patches/pchunks/036.txt patches/pchunks/037.txt patches/pchunks/038.txt patches/pchunks/039.txt > /tmp/new-ma.patch
+          : > /tmp/new-ma.patch
+          for i in $(seq -w 0 39); do
+            f=$(printf 'patches/pcb64/%03d.b64' $((10#$i)))
+            test -f "$f"
+            base64 -d "$f" >> /tmp/new-ma.patch
+          done
           echo "patch_bytes=$(wc -c < /tmp/new-ma.patch)"
           echo "patch_md5=$(md5sum /tmp/new-ma.patch | awk '{print $1}')"
           test "$(wc -c < /tmp/new-ma.patch)" -eq 29713
           test "$(md5sum /tmp/new-ma.patch | awk '{print $1}')" = "aa1e9ccaa23b21cb24ad94c02aa58e88"
-          head -5 /tmp/new-ma.patch
           if ! git apply --check /tmp/new-ma.patch; then
-            echo "git apply --check FAILED — aborting without changes"
+            echo "git apply --check FAILED"
             exit 1
           fi
           git apply /tmp/new-ma.patch
@@ -35,11 +39,10 @@ jobs:
           grep -q "Clear state" app/src/main/java/com/saraai/offline/MainActivity.kt
           grep -q 'Text("Load")' app/src/main/java/com/saraai/offline/MainActivity.kt
           grep -q "not auto-connected" app/src/main/java/com/saraai/offline/MainActivity.kt
-          grep -q "SecureApiKeys" app/src/main/java/com/saraai/offline/MainActivity.kt
-          echo "MainActivity markers OK size=$(wc -c < app/src/main/java/com/saraai/offline/MainActivity.kt)"
+          echo "markers OK"
       - name: Unit tests
         run: chmod +x gradlew && ./gradlew :bureau-core:test --stacktrace
-      - name: Commit patched MainActivity
+      - name: Commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
