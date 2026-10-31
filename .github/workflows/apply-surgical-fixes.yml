@@ -7,192 +7,36 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout fix branch
+        uses: actions/checkout@v4
         with:
           ref: fix/settings-models-controls
           fetch-depth: 0
-      - name: "1-5 Surgical edits"
+      - name: Assemble patcher
         run: |
-          python3 << 'PY'
-          from pathlib import Path
-          p = Path("app/src/main/java/com/saraai/offline/MainActivity.kt")
-          t = p.read_text(encoding="utf-8")
-
-          # imports
-          if "import android.net.Uri" not in t:
-              t = t.replace("import android.provider.Settings\n", "import android.provider.Settings\nimport android.net.Uri\n")
-          if "import java.io.File" not in t:
-              t = t.replace("import java.util.UUID\n", "import java.util.UUID\nimport java.io.File\n")
-          if "import com.saraai.offline.model.GgufValidator" not in t:
-              t = t.replace("import com.saraai.offline.model.ModelDownloader\n", "import com.saraai.offline.model.ModelDownloader\nimport com.saraai.offline.model.GgufValidator\n")
-
-          # allowGroups harden
-          old = "var allowGroups by remember { mutableStateOf(false) }\n                            LaunchedEffect(Unit) { allowGroups = PrefsStore.read(this@MainActivity).allowGroups }"
-          new = "var allowGroups by remember { mutableStateOf(false) }\n                            var delaySec by remember { mutableStateOf(4) }\n                            LaunchedEffect(Unit) {\n                                try {\n                                    val rp = PrefsStore.read(this@MainActivity)\n                                    allowGroups = rp.allowGroups\n                                    delaySec = rp.delaySec\n                                } catch (_: Exception) {}\n                            }"
-          if old in t and "var delaySec by remember" not in t:
-              t = t.replace(old, new, 1); print("allowGroups ok")
-
-          old2 = """LaunchedEffect(Unit) {
-                                val s = ProviderPrefs.read(this@MainActivity)
-                                activeKind = s.activeKind
-                                timeoutSec = s.timeoutSec
-                                modelField = s.modelFor(s.activeKind)
-                                baseUrlField = s.baseUrlFor(s.activeKind)
-                                keyMask = SecureApiKeys.mask(this@MainActivity, s.activeKind)
-                            }"""
-          new2 = """LaunchedEffect(Unit) {
-                                try {
-                                    val s = ProviderPrefs.read(this@MainActivity)
-                                    activeKind = s.activeKind
-                                    timeoutSec = s.timeoutSec
-                                    modelField = s.modelFor(s.activeKind)
-                                    baseUrlField = s.baseUrlFor(s.activeKind)
-                                    keyMask = SecureApiKeys.mask(this@MainActivity, s.activeKind)
-                                } catch (_: Exception) {
-                                    keyMask = "(error loading keys)"
-                                }
-                            }"""
-          if old2 in t and "error loading keys" not in t:
-              t = t.replace(old2, new2, 1); print("provider LE ok")
-
-          # cloud always visible
-          if "Cloud API / API Key" not in t:
-              start = "if (activeKind != ProviderKind.Local.id) {"
-              # find the settings cloud gate (last occurrence of this if)
-              idx = t.rfind(start)
-              if idx < 0:
-                  raise SystemExit("cloud start missing")
-              # find matching else Local GGUF line after idx
-              end_mark = 'Text("Local GGUF via llama.cpp. Use Models tab to load.")'
-              e = t.find(end_mark, idx)
-              if e < 0:
-                  raise SystemExit("cloud end missing")
-              # expand end to closing brace line
-              e2 = t.find("\n", e)
-              e3 = t.find("\n", e2+1)  # line with }
-              block_end = e3
-              # also include the } else { before Text
-              else_pos = t.rfind("} else {", idx, e)
-              if else_pos < 0:
-                  raise SystemExit("else missing")
-              # start of if block - go back to beginning of line
-              line_start = t.rfind("\n", 0, idx) + 1
-              rep = '''Text("Cloud API / API Key", fontWeight = FontWeight.Bold)
-                            Text("Configure any cloud provider key here. Active provider is selected above.", style = MaterialTheme.typography.bodySmall)
-                            OutlinedTextField(
-                                value = keyInput,
-                                onValueChange = { keyInput = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("API key") },
-                                visualTransformation = if (keyVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                                trailingIcon = {
-                                    IconButton(onClick = { keyVisible = !keyVisible }) {
-                                        Icon(if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = null)
-                                    }
-                                },
-                            )
-                            Text("Saved: $keyMask", style = MaterialTheme.typography.bodySmall)
-                            OutlinedTextField(modelField, { modelField = it }, Modifier.fillMaxWidth(), label = { Text("Model name") })
-                            if (activeKind == ProviderKind.OpenAiCompat.id || activeKind == ProviderKind.OpenAi.id ||
-                                activeKind == ProviderKind.Grok.id || activeKind == ProviderKind.NvidiaNim.id) {
-                                OutlinedTextField(baseUrlField, { baseUrlField = it }, Modifier.fillMaxWidth(), label = { Text("Base URL") })
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = {
-                                    scope.launch {
-                                        try {
-                                            if (keyInput.isNotBlank()) {
-                                                SecureApiKeys.save(this@MainActivity, activeKind, keyInput.trim())
-                                                keyInput = ""
-                                                keyMask = SecureApiKeys.mask(this@MainActivity, activeKind)
-                                            }
-                                            ProviderPrefs.update(this@MainActivity) { cur ->
-                                                when (activeKind) {
-                                                    ProviderKind.Gemini.id -> cur.copy(geminiModel = modelField.trim())
-                                                    ProviderKind.OpenAi.id -> cur.copy(openaiModel = modelField.trim(), openaiBaseUrl = baseUrlField.trim().ifBlank { cur.openaiBaseUrl })
-                                                    ProviderKind.Grok.id -> cur.copy(grokModel = modelField.trim(), grokBaseUrl = baseUrlField.trim().ifBlank { cur.grokBaseUrl })
-                                                    ProviderKind.NvidiaNim.id -> cur.copy(nvidiaModel = modelField.trim(), nvidiaBaseUrl = baseUrlField.trim().ifBlank { cur.nvidiaBaseUrl })
-                                                    ProviderKind.OpenAiCompat.id -> cur.copy(customModel = modelField.trim(), customBaseUrl = baseUrlField.trim())
-                                                    else -> cur
-                                                }.copy(timeoutSec = timeoutSec)
-                                            }
-                                            connStatus = "Saved"
-                                        } catch (t: Throwable) {
-                                            connStatus = "Save error: ${t.message}"
-                                        }
-                                    }
-                                }) { Text("Save") }
-                                Button(enabled = !testing && activeKind != ProviderKind.Local.id, onClick = {
-                                    testing = true
-                                    connStatus = "Testing…"
-                                    scope.launch {
-                                        try {
-                                            val r = AiRouter.testConnection(this@MainActivity, ProviderKind.fromId(activeKind))
-                                            connStatus = if (r.ok) "OK (${r.latencyMs}ms)" else "Fail: ${r.error}"
-                                        } catch (t: Throwable) {
-                                            connStatus = "Fail: ${t.message}"
-                                        }
-                                        testing = false
-                                    }
-                                }) { Text("Test connection") }
-                            }
-                            if (connStatus.isNotBlank()) Text(connStatus)
-                            Text("Timeout seconds: $timeoutSec")
-                            Slider(value = timeoutSec.toFloat(), onValueChange = { timeoutSec = it.toInt() }, valueRange = 15f..90f, steps = 14)
-                            if (activeKind == ProviderKind.Local.id) {
-                                Text("Active: Local GGUF via llama.cpp. Use Models tab to Connect / Load.", style = MaterialTheme.typography.bodySmall)
-                            }'''
-              # keep indent of line_start
-              indent = "                            "
-              t = t[:line_start] + indent + rep + t[block_end:]
-              print("cloud ok")
-
-          # Memory / delay before Privacy heading
-          if "Memory / Knowledge" not in t:
-              pin = t.find('Text("Privacy", fontWeight = FontWeight.Bold)')
-              if pin < 0:
-                  raise SystemExit("Privacy heading missing")
-              # insert before the HorizontalDivider that precedes Privacy if present
-              hd = t.rfind("HorizontalDivider", 0, pin)
-              insert_at = hd if hd > 0 else pin
-              # find line start
-              insert_at = t.rfind("\n", 0, insert_at) + 1
-              block = '''                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                            Text("Memory / Knowledge", fontWeight = FontWeight.Bold)
-                            Text("Explicit knowledge only — customer WhatsApp messages are NOT auto-saved. Manage entries in the Knowledge tab.", style = MaterialTheme.typography.bodySmall)
-                            Text("Instructions", fontWeight = FontWeight.Bold)
-                            Text("Owner instructions are managed in the Knowledge tab and applied to chat + auto-reply.", style = MaterialTheme.typography.bodySmall)
-                            Text("Reply delay (seconds): $delaySec")
-                            Slider(
-                                value = delaySec.toFloat(),
-                                onValueChange = {
-                                    delaySec = it.toInt()
-                                    scope.launch {
-                                        try {
-                                            PrefsStore.update(this@MainActivity) { p -> p.copy(delaySec = delaySec) }
-                                        } catch (_: Exception) {}
-                                    }
-                                },
-                                valueRange = 0f..20f,
-                                steps = 19,
-                            )
-                            Text("Set 0 to remove artificial delay before notification replies.", style = MaterialTheme.typography.bodySmall)
-'''
-              t = t[:insert_at] + block + t[insert_at:]
-              print("memory ok")
-
-          t = t.replace('Text("Version 2.1.0 · ARM64 · Local + Cloud")', 'Text("Version 2.1.1 · ARM64 · Local + Cloud")')
-          p.write_text(t, encoding="utf-8")
-          for m in ["Cloud API / API Key", "Memory / Knowledge", "Reply delay", "Version 2.1.1"]:
-              print(m, "OK" if m in t else "MISSING")
-          print("brace", t.count("{") - t.count("}"))
-          PY
-      - name: Commit to fix branch
+          cat tools/pma_part1.py tools/pma_part2.py > tools/patch_mainactivity.py
+          wc -c tools/patch_mainactivity.py
+          python3 -m py_compile tools/patch_mainactivity.py
+      - name: Run surgical patch (abort on failure, no commit)
+        run: |
+          python3 tools/patch_mainactivity.py
+          test -f app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -q "Cloud API / API Key" app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -q "Pick GGUF" app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -q "Memory / Knowledge" app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -q "Reply delay" app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -q "Load / Use Local" app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -q "error loading keys" app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -q "Version 2.1.1" app/src/main/java/com/saraai/offline/MainActivity.kt
+          echo "ALL MARKERS VERIFIED"
+      - name: Commit only if verified
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/com/saraai/offline/MainActivity.kt
-          if git diff --cached --quiet; then echo "No change"; else
-            git commit -m "fix(settings): Cloud API always visible, Memory/delay, crash harden (v2.1.1)"
-            git push origin HEAD:fix/settings-models-controls
+          if git diff --cached --quiet; then
+            echo "No change to commit"
+            exit 0
           fi
+          git commit -m "fix(settings/models): Cloud API always visible, GGUF picker, Memory/delay, crash harden (v2.1.1)"
+          git push origin HEAD:fix/settings-models-controls
