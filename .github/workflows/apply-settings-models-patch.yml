@@ -4,7 +4,7 @@ on:
   push:
     branches: [fix/settings-models-controls]
     paths:
-      - 'patches/b64/**'
+      - 'patches/append/**'
       - '.github/workflows/apply-settings-models-patch.yml'
 jobs:
   apply:
@@ -16,17 +16,16 @@ jobs:
         with:
           ref: fix/settings-models-controls
           fetch-depth: 0
-      - name: Decode and apply patch safely
+      - name: Assemble patch and apply safely
         run: |
           set -euo pipefail
-          cat patches/b64/part00.b64 patches/b64/part01.b64 patches/b64/part02.b64 patches/b64/part03.b64 patches/b64/part04.b64 patches/b64/part05.b64 patches/b64/part06.b64 patches/b64/part07.b64 patches/b64/part08.b64 patches/b64/part09.b64 patches/b64/part10.b64 patches/b64/part11.b64 patches/b64/part12.b64 patches/b64/part13.b64 patches/b64/part14.b64 patches/b64/part15.b64 patches/b64/part16.b64 patches/b64/part17.b64 patches/b64/part18.b64 patches/b64/part19.b64 | tr -d '\n' | base64 -d > /tmp/new-ma.patch
+          cat patches/append/00.txt patches/append/01.txt patches/append/02.txt patches/append/03.txt patches/append/04.txt patches/append/05.txt patches/append/06.txt patches/append/07.txt patches/append/08.txt patches/append/09.txt patches/append/10.txt patches/append/11.txt > /tmp/new-ma.patch
           wc -c /tmp/new-ma.patch
           head -8 /tmp/new-ma.patch
           if git apply --check /tmp/new-ma.patch; then
             git apply /tmp/new-ma.patch
           else
             echo "Patch does not apply cleanly. Aborting without changes."
-            git apply --check /tmp/new-ma.patch || true
             exit 1
           fi
           grep -q "Import GGUF" app/src/main/java/com/saraai/offline/MainActivity.kt
@@ -34,19 +33,13 @@ jobs:
           grep -q "Clear state" app/src/main/java/com/saraai/offline/MainActivity.kt
           grep -q 'Text("Load")' app/src/main/java/com/saraai/offline/MainActivity.kt
           grep -q "not auto-connected" app/src/main/java/com/saraai/offline/MainActivity.kt
-          wc -c app/src/main/java/com/saraai/offline/MainActivity.kt
       - name: Unit tests
-        run: |
-          chmod +x gradlew
-          ./gradlew :bureau-core:test --stacktrace
-      - name: Commit patched MainActivity
+        run: chmod +x gradlew && ./gradlew :bureau-core:test --stacktrace
+      - name: Commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/com/saraai/offline/MainActivity.kt
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
+          git diff --cached --quiet && exit 0
           git commit -m "fix: Settings always-visible cloud API, GGUF import, model Load/Clear (no auto-connect)"
           git push origin fix/settings-models-controls
