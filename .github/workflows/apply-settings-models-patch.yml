@@ -4,7 +4,7 @@ on:
   push:
     branches: [fix/settings-models-controls]
     paths:
-      - 'patches/mainactivity-settings-models.patch'
+      - 'patches/**'
       - '.github/workflows/apply-settings-models-patch.yml'
 jobs:
   apply:
@@ -16,18 +16,23 @@ jobs:
         with:
           ref: fix/settings-models-controls
           fetch-depth: 0
-      - name: Apply patch safely
+      - name: Assemble and apply patch safely
         run: |
           set -euo pipefail
-          if [ ! -f patches/mainactivity-settings-models.patch ]; then
-            echo "Patch file missing"
+          if [ -f patches/mainactivity-settings-models.patch ]; then
+            PATCH=patches/mainactivity-settings-models.patch
+          elif [ -f patches/part1.patch ] && [ -f patches/part2.patch ]; then
+            cat patches/part1.patch patches/part2.patch > /tmp/mainactivity-settings-models.patch
+            PATCH=/tmp/mainactivity-settings-models.patch
+          else
+            echo "Patch file(s) missing"
             exit 1
           fi
-          if git apply --check patches/mainactivity-settings-models.patch; then
-            git apply patches/mainactivity-settings-models.patch
+          if git apply --check "$PATCH"; then
+            git apply "$PATCH"
           else
             echo "Patch does not apply cleanly against current tree. Aborting without changes."
-            git apply --check patches/mainactivity-settings-models.patch || true
+            git apply --check "$PATCH" || true
             exit 1
           fi
           grep -q "Import GGUF" app/src/main/java/com/saraai/offline/MainActivity.kt
