@@ -1,0 +1,48 @@
+name: Apply settings-models patch
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/settings-models-controls]
+    paths:
+      - 'patches/mainactivity-settings-models.patch'
+      - '.github/workflows/apply-settings-models-patch.yml'
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/settings-models-controls
+          fetch-depth: 0
+      - name: Apply patch safely
+        run: |
+          set -euo pipefail
+          if [ ! -f patches/mainactivity-settings-models.patch ]; then
+            echo "Patch file missing"
+            exit 1
+          fi
+          if git apply --check patches/mainactivity-settings-models.patch; then
+            git apply patches/mainactivity-settings-models.patch
+          else
+            echo "Patch does not apply cleanly against current tree. Aborting without changes."
+            git apply --check patches/mainactivity-settings-models.patch || true
+            exit 1
+          fi
+          grep -q "Import GGUF" app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -q "Cloud API configuration" app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -q "Clear state" app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -q 'Text("Load")' app/src/main/java/com/saraai/offline/MainActivity.kt
+          wc -c app/src/main/java/com/saraai/offline/MainActivity.kt
+      - name: Commit patched MainActivity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/saraai/offline/MainActivity.kt
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "fix: Settings always-visible cloud API, GGUF import, model Load/Clear controls"
+          git push origin fix/settings-models-controls
