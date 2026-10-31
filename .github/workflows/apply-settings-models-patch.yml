@@ -19,21 +19,26 @@ jobs:
       - name: Decode and apply patch safely
         run: |
           set -euo pipefail
-          cat patches/b64/part00.b64 patches/b64/part01.b64 patches/b64/part02.b64 patches/b64/part03.b64 patches/b64/part04.b64 patches/b64/part05.b64 patches/b64/part06.b64 patches/b64/part07.b64 patches/b64/part08.b64 patches/b64/part09.b64 patches/b64/part10.b64 | base64 -d > /tmp/mainactivity-settings-models.patch
-          wc -c /tmp/mainactivity-settings-models.patch
-          head -5 /tmp/mainactivity-settings-models.patch
-          if git apply --check /tmp/mainactivity-settings-models.patch; then
-            git apply /tmp/mainactivity-settings-models.patch
+          cat patches/b64/part00.b64 patches/b64/part01.b64 patches/b64/part02.b64 patches/b64/part03.b64 patches/b64/part04.b64 patches/b64/part05.b64 patches/b64/part06.b64 patches/b64/part07.b64 patches/b64/part08.b64 patches/b64/part09.b64 patches/b64/part10.b64 patches/b64/part11.b64 patches/b64/part12.b64 patches/b64/part13.b64 patches/b64/part14.b64 patches/b64/part15.b64 patches/b64/part16.b64 patches/b64/part17.b64 patches/b64/part18.b64 patches/b64/part19.b64 | tr -d '\n' | base64 -d > /tmp/new-ma.patch
+          wc -c /tmp/new-ma.patch
+          head -8 /tmp/new-ma.patch
+          if git apply --check /tmp/new-ma.patch; then
+            git apply /tmp/new-ma.patch
           else
             echo "Patch does not apply cleanly. Aborting without changes."
-            git apply --check /tmp/mainactivity-settings-models.patch || true
+            git apply --check /tmp/new-ma.patch || true
             exit 1
           fi
           grep -q "Import GGUF" app/src/main/java/com/saraai/offline/MainActivity.kt
           grep -q "Cloud API configuration" app/src/main/java/com/saraai/offline/MainActivity.kt
           grep -q "Clear state" app/src/main/java/com/saraai/offline/MainActivity.kt
           grep -q 'Text("Load")' app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -q "not auto-connected" app/src/main/java/com/saraai/offline/MainActivity.kt
           wc -c app/src/main/java/com/saraai/offline/MainActivity.kt
+      - name: Unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew :bureau-core:test --stacktrace
       - name: Commit patched MainActivity
         run: |
           git config user.name "github-actions[bot]"
@@ -43,5 +48,5 @@ jobs:
             echo "No changes to commit"
             exit 0
           fi
-          git commit -m "fix: Settings always-visible cloud API, GGUF import, model Load/Clear controls"
+          git commit -m "fix: Settings always-visible cloud API, GGUF import, model Load/Clear (no auto-connect)"
           git push origin fix/settings-models-controls
