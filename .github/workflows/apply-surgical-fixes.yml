@@ -1,0 +1,29 @@
+name: Apply surgical MainActivity fixes
+on:
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/settings-models-controls
+          fetch-depth: 0
+      - name: Apply surgical_fix.py
+        run: |
+          python3 tools/surgical_fix_mainactivity.py
+          md5sum app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -n "Cloud API / API Key\|Pick GGUF\|Memory / Knowledge\|Version 2.1.1\|Load / Use Local" app/src/main/java/com/saraai/offline/MainActivity.kt
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/saraai/offline/MainActivity.kt
+          if git diff --cached --quiet; then
+            echo "No change"
+          else
+            git commit -m "fix(settings/models): always-visible Cloud API, GGUF picker, Memory/delay, crash hardening (v2.1.1)"
+            git push origin HEAD:fix/settings-models-controls
+          fi
