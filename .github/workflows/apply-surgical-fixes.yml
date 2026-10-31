@@ -11,16 +11,218 @@ jobs:
         with:
           ref: fix/settings-models-controls
           fetch-depth: 0
-      - name: Assemble surgical script
+
+      - name: "1 Imports"
         run: |
-          cat tools/surgical_fix_part1.py tools/surgical_fix_part2.py > tools/surgical_fix_mainactivity.py
-          wc -c tools/surgical_fix_mainactivity.py
-          python3 -m py_compile tools/surgical_fix_mainactivity.py
-      - name: Apply surgical_fix.py
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("app/src/main/java/com/saraai/offline/MainActivity.kt")
+          t = p.read_text(encoding="utf-8")
+          if "import android.net.Uri" not in t:
+              t = t.replace("import android.provider.Settings\n", "import android.provider.Settings\nimport android.net.Uri\n")
+          if "import java.io.File" not in t:
+              t = t.replace("import java.util.UUID\n", "import java.util.UUID\nimport java.io.File\n")
+          if "import com.saraai.offline.model.GgufValidator" not in t:
+              t = t.replace("import com.saraai.offline.model.ModelDownloader\n", "import com.saraai.offline.model.ModelDownloader\nimport com.saraai.offline.model.GgufValidator\n")
+          p.write_text(t, encoding="utf-8")
+          print("imports ok")
+          PY
+
+      - name: "2 Settings crash try/catch + delaySec"
         run: |
-          python3 tools/surgical_fix_mainactivity.py
-          md5sum app/src/main/java/com/saraai/offline/MainActivity.kt
-          grep -n "Cloud API / API Key\|Pick GGUF\|Memory / Knowledge\|Version 2.1.1\|Load / Use Local" app/src/main/java/com/saraai/offline/MainActivity.kt
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("app/src/main/java/com/saraai/offline/MainActivity.kt")
+          t = p.read_text(encoding="utf-8")
+          old = """                            var allowGroups by remember { mutableStateOf(false) }
+                            LaunchedEffect(Unit) { allowGroups = PrefsStore.read(this@MainActivity).allowGroups }"""
+          new = """                            var allowGroups by remember { mutableStateOf(false) }
+                            var delaySec by remember { mutableStateOf(4) }
+                            LaunchedEffect(Unit) {
+                                try {
+                                    val rp = PrefsStore.read(this@MainActivity)
+                                    allowGroups = rp.allowGroups
+                                    delaySec = rp.delaySec
+                                } catch (_: Exception) {}
+                            }"""
+          if old in t:
+              t = t.replace(old, new, 1)
+              print("allowGroups hardened")
+          else:
+              print("allowGroups already patched or missing")
+          old2 = """                            LaunchedEffect(Unit) {
+                                val s = ProviderPrefs.read(this@MainActivity)
+                                activeKind = s.activeKind
+                                timeoutSec = s.timeoutSec
+                                modelField = s.modelFor(s.activeKind)
+                                baseUrlField = s.baseUrlFor(s.activeKind)
+                                keyMask = SecureApiKeys.mask(this@MainActivity, s.activeKind)
+                            }"""
+          new2 = """                            LaunchedEffect(Unit) {
+                                try {
+                                    val s = ProviderPrefs.read(this@MainActivity)
+                                    activeKind = s.activeKind
+                                    timeoutSec = s.timeoutSec
+                                    modelField = s.modelFor(s.activeKind)
+                                    baseUrlField = s.baseUrlFor(s.activeKind)
+                                    keyMask = SecureApiKeys.mask(this@MainActivity, s.activeKind)
+                                } catch (_: Exception) {
+                                    keyMask = "(error loading keys)"
+                                }
+                            }"""
+          if old2 in t:
+              t = t.replace(old2, new2, 1)
+              print("provider LE hardened")
+          else:
+              print("provider LE already patched or missing")
+          p.write_text(t, encoding="utf-8")
+          PY
+
+      - name: "3 Always-visible Cloud API"
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("app/src/main/java/com/saraai/offline/MainActivity.kt")
+          t = p.read_text(encoding="utf-8")
+          if "Cloud API / API Key" in t:
+              print("already present"); raise SystemExit(0)
+          start = "                            if (activeKind != ProviderKind.Local.id) {"
+          end = "                            } else:\\n                                Text(\"Local GGUF via llama.cpp. Use Models tab to load.\")\\n                            }"
+          end = "                            } else:{\n                                Text(\"Local GGUF via llama.cpp. Use Models tab to load.\")\n                            }"
+          # Fix end marker - use real newlines
+          end = (
+              "                            } else {\n"
+              "                                Text(\"Local GGUF via llama.cpp. Use Models tab to load.\")\n"
+              "                            }"
+          )
+          i0 = t.find(start)
+          i1 = t.find(end, i0)
+          if i0 < 0 or i1 < 0:
+              print("markers missing", i0, i1); raise SystemExit(1)
+          i1e = i1 + len(end)
+          rep = (
+              '                            Text("Cloud API / API Key", fontWeight = FontWeight.Bold)\n'
+              '                            Text("Configure any cloud provider key here. Active provider is selected above.", style = MaterialTheme.typography.bodySmall)\n'
+              '                            OutlinedTextField(\n'
+              '                                value = keyInput,\n'
+              '                                onValueChange = { keyInput = it },\n'
+              '                                modifier = Modifier.fillMaxWidth(),\n'
+              '                                label = { Text("API key") },\n'
+              '                                visualTransformation = if (keyVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),\n'
+              '                                trailingIcon = {\n'
+              '                                    IconButton(onClick = { keyVisible = !keyVisible }) {\n'
+              '                                        Icon(if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = null)\n'
+              '                                    }\n'
+              '                                },\n'
+              '                            )\n'
+              '                            Text("Saved: $keyMask", style = MaterialTheme.typography.bodySmall)\n'
+              '                            OutlinedTextField(modelField, { modelField = it }, Modifier.fillMaxWidth(), label = { Text("Model name") })\n'
+              '                            if (activeKind == ProviderKind.OpenAiCompat.id || activeKind == ProviderKind.OpenAi.id ||\n'
+              '                                activeKind == ProviderKind.Grok.id || activeKind == ProviderKind.NvidiaNim.id) {\n'
+              '                                OutlinedTextField(baseUrlField, { baseUrlField = it }, Modifier.fillMaxWidth(), label = { Text("Base URL") })\n'
+              '                            }\n'
+              '                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {\n'
+              '                                Button(onClick = {\n'
+              '                                    scope.launch {\n'
+              '                                        try {\n'
+              '                                            if (keyInput.isNotBlank()) {\n'
+              '                                                SecureApiKeys.save(this@MainActivity, activeKind, keyInput.trim())\n'
+              '                                                keyInput = ""\n'
+              '                                                keyMask = SecureApiKeys.mask(this@MainActivity, activeKind)\n'
+              '                                            }\n'
+              '                                            ProviderPrefs.update(this@MainActivity) { cur ->\n'
+              '                                                when (activeKind) {\n'
+              '                                                    ProviderKind.Gemini.id -> cur.copy(geminiModel = modelField.trim())\n'
+              '                                                    ProviderKind.OpenAi.id -> cur.copy(openaiModel = modelField.trim(), openaiBaseUrl = baseUrlField.trim().ifBlank { cur.openaiBaseUrl })\n'
+              '                                                    ProviderKind.Grok.id -> cur.copy(grokModel = modelField.trim(), grokBaseUrl = baseUrlField.trim().ifBlank { cur.grokBaseUrl })\n'
+              '                                                    ProviderKind.NvidiaNim.id -> cur.copy(nvidiaModel = modelField.trim(), nvidiaBaseUrl = baseUrlField.trim().ifBlank { cur.nvidiaBaseUrl })\n'
+              '                                                    ProviderKind.OpenAiCompat.id -> cur.copy(customModel = modelField.trim(), customBaseUrl = baseUrlField.trim())\n'
+              '                                                    else -> cur\n'
+              '                                                }.copy(timeoutSec = timeoutSec)\n'
+              '                                            }\n'
+              '                                            connStatus = "Saved"\n'
+              '                                        } catch (t: Throwable) {\n'
+              '                                            connStatus = "Save error: ${t.message}"\n'
+              '                                        }\n'
+              '                                    }\n'
+              '                                }) { Text("Save") }\n'
+              '                                Button(enabled = !testing && activeKind != ProviderKind.Local.id, onClick = {\n'
+              '                                    testing = true\n'
+              '                                    connStatus = "Testing…"\n'
+              '                                    scope.launch {\n'
+              '                                        try {\n'
+              '                                            val r = AiRouter.testConnection(this@MainActivity, ProviderKind.fromId(activeKind))\n'
+              '                                            connStatus = if (r.ok) "OK (${r.latencyMs}ms)" else "Fail: ${r.error}"\n'
+              '                                        } catch (t: Throwable) {\n'
+              '                                            connStatus = "Fail: ${t.message}"\n'
+              '                                        }\n'
+              '                                        testing = false\n'
+              '                                    }\n'
+              '                                }) { Text("Test connection") }\n'
+              '                            }\n'
+              '                            if (connStatus.isNotBlank()) Text(connStatus)\n'
+              '                            Text("Timeout seconds: $timeoutSec")\n'
+              '                            Slider(value = timeoutSec.toFloat(), onValueChange = { timeoutSec = it.toInt() }, valueRange = 15f..90f, steps = 14)\n'
+              '                            if (activeKind == ProviderKind.Local.id) {\n'
+              '                                Text("Active: Local GGUF via llama.cpp. Use Models tab to Connect / Load.", style = MaterialTheme.typography.bodySmall)\n'
+              '                            }'
+          )
+          t = t[:i0] + rep + t[i1e:]
+          p.write_text(t, encoding="utf-8")
+          print("cloud always-visible ok")
+          PY
+
+      - name: "4 Memory Instructions delay UI"
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("app/src/main/java/com/saraai/offline/MainActivity.kt")
+          t = p.read_text(encoding="utf-8")
+          if "Memory / Knowledge" in t:
+              print("already present"); raise SystemExit(0)
+          old = """                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                            Text("Privacy", fontWeight = FontWeight.Bold)"""
+          new = """                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                            Text("Memory / Knowledge", fontWeight = FontWeight.Bold)
+                            Text("Explicit knowledge only — customer WhatsApp messages are NOT auto-saved. Manage entries in the Knowledge tab.", style = MaterialTheme.typography.bodySmall)
+                            Text("Instructions", fontWeight = FontWeight.Bold)
+                            Text("Owner instructions are managed in the Knowledge tab and applied to chat + auto-reply.", style = MaterialTheme.typography.bodySmall)
+                            Text("Reply delay (seconds): $delaySec")
+                            Slider(
+                                value = delaySec.toFloat(),
+                                onValueChange = {
+                                    delaySec = it.toInt()
+                                    scope.launch {
+                                        try {
+                                            PrefsStore.update(this@MainActivity) { p -> p.copy(delaySec = delaySec) }
+                                        } catch (_: Exception) {}
+                                    }
+                                },
+                                valueRange = 0f..20f,
+                                steps = 19,
+                            )
+                            Text("Set 0 to remove artificial delay before notification replies.", style = MaterialTheme.typography.bodySmall)
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                            Text("Privacy", fontWeight = FontWeight.Bold)"""
+          if old not in t:
+              print("privacy marker missing"); raise SystemExit(1)
+          t = t.replace(old, new, 1)
+          p.write_text(t, encoding="utf-8")
+          print("memory/delay ok")
+          PY
+
+      - name: "6 Version + markers (models step separate if needed)"
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("app/src/main/java/com/saraai/offline/MainActivity.kt")
+          t = p.read_text(encoding="utf-8")
+          t = t.replace('Text("Version 2.1.0 · ARM64 · Local + Cloud")', 'Text("Version 2.1.1 · ARM64 · Local + Cloud")')
+          p.write_text(t, encoding="utf-8")
+          for m in ["Cloud API / API Key", "Memory / Knowledge", "Reply delay", "Version 2.1.1"]:
+              print(m, "OK" if m in t else "MISSING")
+          PY
+
       - name: Commit
         run: |
           git config user.name "github-actions[bot]"
@@ -29,6 +231,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No change"
           else
-            git commit -m "fix(settings/models): always-visible Cloud API, GGUF picker, Memory/delay, crash hardening (v2.1.1)"
+            git commit -m "fix(settings): Cloud API always visible, Memory/delay, crash harden (v2.1.1)"
             git push origin HEAD:fix/settings-models-controls
           fi
