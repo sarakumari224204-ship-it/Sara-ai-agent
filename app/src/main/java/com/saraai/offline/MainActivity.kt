@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,11 +40,13 @@ import com.saraai.offline.ai.SecureApiKeys
 import com.saraai.offline.llm.LlamaBridge
 import com.saraai.offline.model.ModelCatalog
 import com.saraai.offline.model.ModelDownloader
+import com.saraai.offline.model.GgufValidator
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     data class ChatMsg(val role: String, val text: String)
@@ -374,20 +377,114 @@ class MainActivity : ComponentActivity() {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = {
                                     scope.launch {
-                                        LlamaBridge.unload()
-                                        modelStatus = "Unloaded"
+                                        try {
+                                            LlamaBridge.unload()
+                                            modelStatus = "Unloaded"
+                                        } catch (t: Throwable) {
+                                            modelStatus = "Unload error: ${t.message}"
+                                        }
                                     }
                                 }) { Text("Unload") }
                                 Button(onClick = {
                                     scope.launch {
-                                        val p = PrefsStore.read(this@MainActivity)
-                                        if (p.modelPath.isNotBlank()) {
-                                            LlamaBridge.tryReload(p.modelPath, LlamaBridge.safeCtx(p.nCtx), LlamaBridge.safeThreads(p.threads))
-                                            modelStatus = LlamaBridge.lastStatusHi
-                                        } else modelStatus = "No model path"
+                                        try {
+                                            val p = PrefsStore.read(this@MainActivity)
+                                            if (p.modelPath.isNotBlank()) {
+                                                LlamaBridge.tryReload(p.modelPath, LlamaBridge.safeCtx(p.nCtx), LlamaBridge.safeThreads(p.threads))
+                                                modelStatus = LlamaBridge.lastStatusHi
+                                            } else modelStatus = "No model path"
+                                        } catch (t: Throwable) {
+                                            modelStatus = "Reload error: ${t.message}"
+                                        }
                                     }
                                 }) { Text("Reload") }
                             }
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                            Text("Local GGUF (storage picker)", fontWeight = FontWeight.Bold)
+                            Text("Pick a .gguf from device storage, Validate, then Load / Connect.", style = MaterialTheme.typography.bodySmall)
+                            var pickStatus by remember { mutableStateOf("") }
+                            val pickGguf = androidx.activity.compose.rememberLauncherForActivityResult(
+                                contract = ActivityResultContracts.OpenDocument()
+                            ) { uri: Uri? ->
+                                if (uri == null) return@rememberLauncherForActivityResult
+                                scope.launch {
+                                    try {
+                                        contentResolver.takePersistableUriPermission(
+                                            uri,
+                                            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                                        )
+                                    } catch (_: SecurityException) {}
+                                    try {
+                                        val dir = File(filesDir, "models").also { it.mkdirs() }
+                                        val dest = File(dir, "imported-${System.currentTimeMillis()}.gguf")
+                                        contentResolver.openInputStream(uri)?.use { ins ->
+                                            dest.outputStream().use { outs -> ins.copyTo(outs) }
+                                        } ?: run {
+                                            pickStatus = "Cannot open selected file"
+                                            return@launch
+                                        }
+                                        val v = GgufValidator.validate(dest)
+                                        if (!v.ok) {
+                                            dest.delete()
+                                            pickStatus = "Invalid: ${v.reason}"
+                                            return@launch
+                                        }
+                                        PrefsStore.update(this@MainActivity) { it.copy(modelPath = dest.absolutePath, modelName = dest.name) }
+                                        pickStatus = "Imported ${dest.name} (${v.sizeBytes / (1024 * 1024)} MB). Tap Load."
+                                        modelStatus = pickStatus
+                                    } catch (t: Throwable) {
+                                        pickStatus = "Import error: ${t.message}"
+                                    }
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { pickGguf.launch(arrayOf("*/*")) }) { Text("Pick GGUF") }
+                                Button(onClick = {
+                                    scope.launch {
+                                        try {
+                                            val path = PrefsStore.read(this@MainActivity).modelPath
+                                            if (path.isBlank()) {
+                                                modelStatus = "No model path — Pick GGUF first"
+                                                return@launch
+                                            }
+                                            val f = File(path)
+                                            val v = GgufValidator.validate(f)
+                                            modelStatus = if (v.ok) "Valid GGUF (${v.sizeBytes / (1024 * 1024)} MB)" else "Invalid: ${v.reason}"
+                                        } catch (t: Throwable) {
+                                            modelStatus = "Validate error: ${t.message}"
+                                        }
+                                    }
+                                }) { Text("Validate") }
+                                Button(onClick = {
+                                    scope.launch {
+                                        try {
+                                            val p = PrefsStore.read(this@MainActivity)
+                                            if (p.modelPath.isBlank()) {
+                                                modelStatus = "No model path"
+                                                return@launch
+                                            }
+                                            LlamaBridge.tryReload(p.modelPath, LlamaBridge.safeCtx(p.nCtx), LlamaBridge.safeThreads(p.threads))
+                                            modelStatus = LlamaBridge.lastStatusHi
+                                            ProviderPrefs.update(this@MainActivity) { it.copy(activeKind = ProviderKind.Local.id) }
+                                        } catch (t: Throwable) {
+                                            modelStatus = "Load error: ${t.message}"
+                                        }
+                                    }
+                                }) { Text("Load / Use Local") }
+                                Button(onClick = {
+                                    scope.launch {
+                                        try {
+                                            LlamaBridge.unload()
+                                            PrefsStore.update(this@MainActivity) { it.copy(modelPath = "", modelName = "") }
+                                            modelStatus = "Cleared model path"
+                                            pickStatus = ""
+                                        } catch (t: Throwable) {
+                                            modelStatus = "Clear error: ${t.message}"
+                                        }
+                                    }
+                                }) { Text("Clear") }
+                            }
+                            if (pickStatus.isNotBlank()) Text(pickStatus, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                     composable("settings") {
@@ -406,7 +503,14 @@ class MainActivity : ComponentActivity() {
                                 })
                             }
                             var allowGroups by remember { mutableStateOf(false) }
-                            LaunchedEffect(Unit) { allowGroups = PrefsStore.read(this@MainActivity).allowGroups }
+                            var delaySec by remember { mutableStateOf(4) }
+                            LaunchedEffect(Unit) {
+                                try {
+                                    val rp = PrefsStore.read(this@MainActivity)
+                                    allowGroups = rp.allowGroups
+                                    delaySec = rp.delaySec
+                                } catch (_: Exception) {}
+                            }
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("Allow group replies"); Switch(allowGroups, {
                                     allowGroups = it
@@ -425,12 +529,16 @@ class MainActivity : ComponentActivity() {
                             var connStatus by remember { mutableStateOf("") }
                             var testing by remember { mutableStateOf(false) }
                             LaunchedEffect(Unit) {
-                                val s = ProviderPrefs.read(this@MainActivity)
-                                activeKind = s.activeKind
-                                timeoutSec = s.timeoutSec
-                                modelField = s.modelFor(s.activeKind)
-                                baseUrlField = s.baseUrlFor(s.activeKind)
-                                keyMask = SecureApiKeys.mask(this@MainActivity, s.activeKind)
+                                try {
+                                    val s = ProviderPrefs.read(this@MainActivity)
+                                    activeKind = s.activeKind
+                                    timeoutSec = s.timeoutSec
+                                    modelField = s.modelFor(s.activeKind)
+                                    baseUrlField = s.baseUrlFor(s.activeKind)
+                                    keyMask = SecureApiKeys.mask(this@MainActivity, s.activeKind)
+                                } catch (_: Exception) {
+                                    keyMask = "(error loading keys)"
+                                }
                             }
                             ProviderKind.all.forEach { k ->
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -456,51 +564,35 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             Text("Active: ${ProviderKind.fromId(activeKind).label}", color = Color(0xFF00C853))
-                            if (activeKind != ProviderKind.Local.id) {
-                                OutlinedTextField(
-                                    value = keyInput,
-                                    onValueChange = { keyInput = it },
-                                    label = { Text("API key (paste then Save)") },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    singleLine = true,
-                                    visualTransformation = if (keyVisible) androidx.compose.ui.text.input.VisualTransformation.None
-                                    else androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                                    trailingIcon = {
-                                        IconButton(onClick = { keyVisible = !keyVisible }) {
-                                            Icon(if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, null)
-                                        }
-                                    },
-                                )
-                                Text("Saved: $keyMask", style = MaterialTheme.typography.bodySmall)
-                                Row {
-                                    Button(onClick = {
-                                        scope.launch {
+                            Text("Cloud API / API Key", fontWeight = FontWeight.Bold)
+                            Text("Configure any cloud provider key here. Active provider is selected above.", style = MaterialTheme.typography.bodySmall)
+                            OutlinedTextField(
+                                value = keyInput,
+                                onValueChange = { keyInput = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("API key") },
+                                visualTransformation = if (keyVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    IconButton(onClick = { keyVisible = !keyVisible }) {
+                                        Icon(if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = null)
+                                    }
+                                },
+                            )
+                            Text("Saved: $keyMask", style = MaterialTheme.typography.bodySmall)
+                            OutlinedTextField(modelField, { modelField = it }, Modifier.fillMaxWidth(), label = { Text("Model name") })
+                            if (activeKind == ProviderKind.OpenAiCompat.id || activeKind == ProviderKind.OpenAi.id ||
+                                activeKind == ProviderKind.Grok.id || activeKind == ProviderKind.NvidiaNim.id) {
+                                OutlinedTextField(baseUrlField, { baseUrlField = it }, Modifier.fillMaxWidth(), label = { Text("Base URL") })
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = {
+                                    scope.launch {
+                                        try {
                                             if (keyInput.isNotBlank()) {
                                                 SecureApiKeys.save(this@MainActivity, activeKind, keyInput.trim())
-                                                keyMask = SecureApiKeys.mask(this@MainActivity, activeKind)
                                                 keyInput = ""
-                                                keyVisible = false
-                                                connStatus = "Key saved (encrypted)"
+                                                keyMask = SecureApiKeys.mask(this@MainActivity, activeKind)
                                             }
-                                        }
-                                    }) { Text("Save key") }
-                                    Spacer(Modifier.width(8.dp))
-                                    OutlinedButton(onClick = {
-                                        scope.launch {
-                                            SecureApiKeys.delete(this@MainActivity, activeKind)
-                                            keyMask = "(not set)"
-                                            connStatus = "Key removed"
-                                        }
-                                    }) { Text("Remove key") }
-                                }
-                                OutlinedTextField(modelField, { modelField = it }, Modifier.fillMaxWidth(), label = { Text("Model name") }, singleLine = true)
-                                if (activeKind == ProviderKind.OpenAiCompat.id || activeKind == ProviderKind.OpenAi.id ||
-                                    activeKind == ProviderKind.Grok.id || activeKind == ProviderKind.NvidiaNim.id) {
-                                    OutlinedTextField(baseUrlField, { baseUrlField = it }, Modifier.fillMaxWidth(), label = { Text("API base URL") }, singleLine = true)
-                                }
-                                Row {
-                                    Button(onClick = {
-                                        scope.launch {
                                             ProviderPrefs.update(this@MainActivity) { cur ->
                                                 when (activeKind) {
                                                     ProviderKind.Gemini.id -> cur.copy(geminiModel = modelField.trim())
@@ -511,26 +603,52 @@ class MainActivity : ComponentActivity() {
                                                     else -> cur
                                                 }.copy(timeoutSec = timeoutSec)
                                             }
-                                            connStatus = "Settings saved"
+                                            connStatus = "Saved"
+                                        } catch (t: Throwable) {
+                                            connStatus = "Save error: ${t.message}"
                                         }
-                                    }) { Text("Save settings") }
-                                    Spacer(Modifier.width(8.dp))
-                                    Button(enabled = !testing, onClick = {
-                                        testing = true
-                                        connStatus = "Testing…"
-                                        scope.launch {
+                                    }
+                                }) { Text("Save") }
+                                Button(enabled = !testing && activeKind != ProviderKind.Local.id, onClick = {
+                                    testing = true
+                                    connStatus = "Testing…"
+                                    scope.launch {
+                                        try {
                                             val r = AiRouter.testConnection(this@MainActivity, ProviderKind.fromId(activeKind))
                                             connStatus = if (r.ok) "OK (${r.latencyMs}ms)" else "Fail: ${r.error}"
-                                            testing = false
+                                        } catch (t: Throwable) {
+                                            connStatus = "Fail: ${t.message}"
                                         }
-                                    }) { Text("Test connection") }
-                                }
-                                if (connStatus.isNotBlank()) Text(connStatus)
-                                Text("Timeout seconds: $timeoutSec")
-                                Slider(value = timeoutSec.toFloat(), onValueChange = { timeoutSec = it.toInt() }, valueRange = 15f..90f, steps = 14)
-                            } else {
-                                Text("Local GGUF via llama.cpp. Use Models tab to load.")
+                                        testing = false
+                                    }
+                                }) { Text("Test connection") }
                             }
+                            if (connStatus.isNotBlank()) Text(connStatus)
+                            Text("Timeout seconds: $timeoutSec")
+                            Slider(value = timeoutSec.toFloat(), onValueChange = { timeoutSec = it.toInt() }, valueRange = 15f..90f, steps = 14)
+                            if (activeKind == ProviderKind.Local.id) {
+                                Text("Active: Local GGUF via llama.cpp. Use Models tab to Connect / Load.", style = MaterialTheme.typography.bodySmall)
+                            }
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                            Text("Memory / Knowledge", fontWeight = FontWeight.Bold)
+                            Text("Explicit knowledge only — customer WhatsApp messages are NOT auto-saved. Manage entries in the Knowledge tab.", style = MaterialTheme.typography.bodySmall)
+                            Text("Instructions", fontWeight = FontWeight.Bold)
+                            Text("Owner instructions are managed in the Knowledge tab and applied to chat + auto-reply.", style = MaterialTheme.typography.bodySmall)
+                            Text("Reply delay (seconds): $delaySec")
+                            Slider(
+                                value = delaySec.toFloat(),
+                                onValueChange = {
+                                    delaySec = it.toInt()
+                                    scope.launch {
+                                        try {
+                                            PrefsStore.update(this@MainActivity) { p -> p.copy(delaySec = delaySec) }
+                                        } catch (_: Exception) {}
+                                    }
+                                },
+                                valueRange = 0f..20f,
+                                steps = 19,
+                            )
+                            Text("Set 0 to remove artificial delay before notification replies.", style = MaterialTheme.typography.bodySmall)
                             HorizontalDivider(Modifier.padding(vertical = 8.dp))
                             Text("Privacy", fontWeight = FontWeight.Bold)
                             Text("Customer messages are processed temporarily. Cloud providers process requests on their servers when selected.")
@@ -547,7 +665,7 @@ class MainActivity : ComponentActivity() {
                                 "n/a"
                             }
                             Text("Free RAM MB: $freeRamMb")
-                            Text("Version 2.1.0 · ARM64 · Local + Cloud")
+                            Text("Version 2.1.1 · ARM64 · Local + Cloud")
                         }
                     }
                 }
