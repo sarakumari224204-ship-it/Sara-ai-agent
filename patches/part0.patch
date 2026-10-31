@@ -1,0 +1,11 @@
+--- a/app/src/main/java/com/saraai/offline/MainActivity.kt
++++ b/app/src/main/java/com/saraai/offline/MainActivity.kt
+@@ -8,6 +8,8 @@
+ import android.os.Build
+ import android.os.Bundle
+ import android.provider.Settings
++import android.net.Uri
++import java.io.File
+ import androidx.activity.ComponentActivity
+ import androidx.activity.compose.setContent
+ import androidx.activity.result.contract.ActivityResultContracts
