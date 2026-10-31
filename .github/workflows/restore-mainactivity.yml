@@ -1,0 +1,24 @@
+name: Restore MainActivity
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/restore-mainactivity.yml'
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore MainActivity from a792ba9
+        run: |
+          git show a792ba9f2d238bfdf0fb6735a194dbcc1921f244:app/src/main/java/com/saraai/offline/MainActivity.kt > app/src/main/java/com/saraai/offline/MainActivity.kt
+          wc -c app/src/main/java/com/saraai/offline/MainActivity.kt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/saraai/offline/MainActivity.kt
+          git commit -m "restore: MainActivity.kt from a792ba9 (full source)" || echo "no change"
+          git push origin main
