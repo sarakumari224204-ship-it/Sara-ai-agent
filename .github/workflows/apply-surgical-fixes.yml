@@ -2,43 +2,57 @@ name: Apply surgical MainActivity fixes
 on:
   workflow_dispatch:
 jobs:
-  apply:
+  publish-apk-release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
-      - name: Checkout fix branch
-        uses: actions/checkout@v4
+      - name: Download existing artifact from run 41178173808
+        uses: actions/download-artifact@v4
         with:
-          ref: fix/settings-models-controls
-          fetch-depth: 0
-      - name: Assemble patcher
+          name: sara-ai-offline-debug-apk
+          run-id: "41178173808"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: apk-out
+      - name: Locate and rename APK
+        id: apk
         run: |
-          cat tools/pma_part1.py tools/pma_gap.py tools/pma_part2.py > tools/patch_mainactivity.py
-          wc -c tools/patch_mainactivity.py
-          python3 -m py_compile tools/patch_mainactivity.py
-      - name: Run surgical patch (abort on failure, no commit)
+          set -euo pipefail
+          find apk-out -type f -name '*.apk' -print
+          APK=$(find apk-out -type f -name '*.apk' | head -n1)
+          test -n "$APK"
+          test -f "$APK"
+          cp "$APK" Sara-AI-v2.1.1-debug.apk
+          ls -la Sara-AI-v2.1.1-debug.apk
+          SIZE=$(stat -c%s Sara-AI-v2.1.1-debug.apk)
+          SHA=$(sha256sum Sara-AI-v2.1.1-debug.apk | awk '{print $1}')
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "SIZE=$SIZE"
+          echo "SHA256=$SHA"
+      - name: Create tag and release, upload APK asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -e
-          python3 tools/patch_mainactivity.py
-          grep -q "Cloud API / API Key" app/src/main/java/com/saraai/offline/MainActivity.kt
-          grep -q "Pick GGUF" app/src/main/java/com/saraai/offline/MainActivity.kt
-          grep -q "Memory / Knowledge" app/src/main/java/com/saraai/offline/MainActivity.kt
-          grep -q "Reply delay" app/src/main/java/com/saraai/offline/MainActivity.kt
-          grep -q "Load / Use Local" app/src/main/java/com/saraai/offline/MainActivity.kt
-          grep -q "error loading keys" app/src/main/java/com/saraai/offline/MainActivity.kt
-          grep -q "Version 2.1.1" app/src/main/java/com/saraai/offline/MainActivity.kt
-          grep -q 'Text("Connect")' app/src/main/java/com/saraai/offline/MainActivity.kt
-          grep -q "isDownloaded" app/src/main/java/com/saraai/offline/MainActivity.kt
-          echo "ALL MARKERS VERIFIED"
-      - name: Commit only if verified
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/src/main/java/com/saraai/offline/MainActivity.kt
-          if git diff --cached --quiet; then
-            echo "No change to commit"
-            exit 0
+          set -euo pipefail
+          TAG=v2.1.1
+          COMMIT=34b52c0dfb6e29c7f90d442ee02d1ec42c2e4419
+          if ! gh api "repos/${{ github.repository }}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            gh api -X POST "repos/${{ github.repository }}/git/refs" \
+              -f ref="refs/tags/${TAG}" \
+              -f sha="${COMMIT}"
           fi
-          git commit -m "fix(settings/models): Cloud API always visible, GGUF picker, Memory/delay, crash harden (v2.1.1)"
-          git push origin HEAD:fix/settings-models-controls
+          if ! gh release view "${TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "${TAG}" \
+              --repo "${{ github.repository }}" \
+              --target "${COMMIT}" \
+              --title "Sara AI v2.1.1 (debug)" \
+              --notes "Debug APK from verified commit ${COMMIT} (Actions run 41178173808). No rebuild — artifact promoted as-is.
+
+Artifact filename: Sara-AI-v2.1.1-debug.apk"
+          fi
+          gh release upload "${TAG}" Sara-AI-v2.1.1-debug.apk \
+            --repo "${{ github.repository }}" \
+            --clobber
+          gh release view "${TAG}" --repo "${{ github.repository }}" --json assets,url,tagName
