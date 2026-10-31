@@ -1,0 +1,44 @@
+name: Apply MainActivity patch (reconstruct)
+on:
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/settings-models-controls
+      - name: Reconstruct and verify MainActivity
+        run: |
+          set -euo pipefail
+          EXPECTED_MD5=5e6ec1226946d86e24834b7004726406
+          mkdir -p /tmp/recon
+          for i in $(seq -w 0 21); do
+            f="patches/ma_parts/${i}.b64"
+            if [ ! -f "$f" ]; then echo "MISSING $f"; ls -la patches/ma_parts/ || true; exit 1; fi
+            cat "$f" >> /tmp/recon/all.b64
+          done
+          base64 -d /tmp/recon/all.b64 > /tmp/recon/MainActivity.kt
+          ACTUAL=$(md5sum /tmp/recon/MainActivity.kt | awk '{print $1}')
+          echo "MD5 expected=$EXPECTED_MD5 actual=$ACTUAL"
+          [ "$ACTUAL" = "$EXPECTED_MD5" ] || { echo "MD5 mismatch"; exit 1; }
+          grep -q "Pick GGUF" /tmp/recon/MainActivity.kt
+          grep -q "Cloud API configuration (always visible)" /tmp/recon/MainActivity.kt
+          grep -q "Version 2.1.1" /tmp/recon/MainActivity.kt
+          grep -q "configKind" /tmp/recon/MainActivity.kt
+          grep -q "GgufValidator" /tmp/recon/MainActivity.kt
+          cp /tmp/recon/MainActivity.kt app/src/main/java/com/saraai/offline/MainActivity.kt
+          echo "MainActivity applied OK ($(wc -c < app/src/main/java/com/saraai/offline/MainActivity.kt) bytes)"
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/saraai/offline/MainActivity.kt
+          if git diff --cached --quiet; then
+            echo "No change"
+          else
+            git commit -m "fix(settings/models): apply reconstructed MainActivity (GGUF picker, always-visible cloud config, crash harden v2.1.1)"
+            git push origin HEAD:fix/settings-models-controls
+          fi
