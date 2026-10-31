@@ -12,8 +12,8 @@ android {
         applicationId = "com.saraai.offline"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "2.1.0"
+        versionCode = 4
+        versionName = "2.1.1"
         ndk { abiFilters += listOf("arm64-v8a") }
         externalNativeBuild {
             cmake {
