@@ -4,7 +4,7 @@ on:
   push:
     branches: [fix/settings-models-controls]
     paths:
-      - 'patches/**'
+      - 'patches/b64/**'
       - '.github/workflows/apply-settings-models-patch.yml'
 jobs:
   apply:
@@ -16,23 +16,17 @@ jobs:
         with:
           ref: fix/settings-models-controls
           fetch-depth: 0
-      - name: Assemble and apply patch safely
+      - name: Decode and apply patch safely
         run: |
           set -euo pipefail
-          if [ -f patches/mainactivity-settings-models.patch ]; then
-            PATCH=patches/mainactivity-settings-models.patch
-          elif [ -f patches/part1.patch ] && [ -f patches/part2.patch ]; then
-            cat patches/part1.patch patches/part2.patch > /tmp/mainactivity-settings-models.patch
-            PATCH=/tmp/mainactivity-settings-models.patch
+          cat patches/b64/part00.b64 patches/b64/part01.b64 patches/b64/part02.b64 patches/b64/part03.b64 patches/b64/part04.b64 patches/b64/part05.b64 patches/b64/part06.b64 patches/b64/part07.b64 patches/b64/part08.b64 patches/b64/part09.b64 patches/b64/part10.b64 | base64 -d > /tmp/mainactivity-settings-models.patch
+          wc -c /tmp/mainactivity-settings-models.patch
+          head -5 /tmp/mainactivity-settings-models.patch
+          if git apply --check /tmp/mainactivity-settings-models.patch; then
+            git apply /tmp/mainactivity-settings-models.patch
           else
-            echo "Patch file(s) missing"
-            exit 1
-          fi
-          if git apply --check "$PATCH"; then
-            git apply "$PATCH"
-          else
-            echo "Patch does not apply cleanly against current tree. Aborting without changes."
-            git apply --check "$PATCH" || true
+            echo "Patch does not apply cleanly. Aborting without changes."
+            git apply --check /tmp/mainactivity-settings-models.patch || true
             exit 1
           fi
           grep -q "Import GGUF" app/src/main/java/com/saraai/offline/MainActivity.kt
