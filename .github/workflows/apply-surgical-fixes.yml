@@ -11,6 +11,11 @@ jobs:
         with:
           ref: fix/settings-models-controls
           fetch-depth: 0
+      - name: Assemble surgical script
+        run: |
+          cat tools/surgical_fix_part1.py tools/surgical_fix_part2.py > tools/surgical_fix_mainactivity.py
+          wc -c tools/surgical_fix_mainactivity.py
+          python3 -m py_compile tools/surgical_fix_mainactivity.py
       - name: Apply surgical_fix.py
         run: |
           python3 tools/surgical_fix_mainactivity.py
