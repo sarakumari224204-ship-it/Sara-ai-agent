@@ -1,0 +1,66 @@
+name: Publish APK Release
+on:
+  workflow_dispatch:
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download existing artifact from run 41178173808
+        uses: actions/download-artifact@v4
+        with:
+          name: sara-ai-offline-debug-apk
+          run-id: 41178173808
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: apk-out
+      - name: Locate and rename APK
+        id: apk
+        run: |
+          set -euo pipefail
+          find apk-out -type f -name '*.apk' -print
+          APK=$(find apk-out -type f -name '*.apk' | head -n1)
+          test -n "$APK"
+          test -f "$APK"
+          cp "$APK" Sara-AI-v2.1.1-debug.apk
+          ls -la Sara-AI-v2.1.1-debug.apk
+          SIZE=$(stat -c%s Sara-AI-v2.1.1-debug.apk)
+          SHA=$(sha256sum Sara-AI-v2.1.1-debug.apk | awk '{print $1}')
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "SIZE=$SIZE"
+          echo "SHA256=$SHA"
+      - name: Create tag and release, upload APK asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG=v2.1.1
+          COMMIT=34b52c0dfb6e29c7f90d442ee02d1ec42c2e4419
+          # Create lightweight tag at exact commit if missing
+          if ! gh api "repos/${{ github.repository }}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            gh api -X POST "repos/${{ github.repository }}/git/refs" \
+              -f ref="refs/tags/${TAG}" \
+              -f sha="${COMMIT}"
+          fi
+          # Create release if missing
+          if ! gh release view "${TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "${TAG}" \
+              --repo "${{ github.repository }}" \
+              --target "${COMMIT}" \
+              --title "Sara AI v2.1.1 (debug)" \
+              --notes "Debug APK from verified commit ${COMMIT} (Actions run 41178173808). No rebuild — artifact promoted as-is.
+
+- Settings crash hardening
+- Cloud API always visible
+- GGUF picker / Validate / Load / Clear
+- Memory + reply delay in Settings
+- Artifact: Sara-AI-v2.1.1-debug.apk"
+          fi
+          # Upload APK (clobber if re-run)
+          gh release upload "${TAG}" Sara-AI-v2.1.1-debug.apk \
+            --repo "${{ github.repository }}" \
+            --clobber
+          echo "Release assets:"
+          gh release view "${TAG}" --repo "${{ github.repository }}" --json assets,url,tagName
