@@ -1,0 +1,11 @@
++                            if (uri == null) return@rememberLauncherForActivityResult
++                            scope.launch {
++                                try {
++                                    downloadMsg = "Importing GGUF…"
++                                    downloadPct = 0
++                                    val name = (uri.lastPathSegment ?: "imported.gguf")
++                                        .substringAfterLast('/')
++                                        .substringAfterLast(':')
++                                        .let { if (it.endsWith(".gguf", true)) it else "$it.gguf" }
++                                    val dest = File(ModelDownloader.modelsDir(this@MainActivity), name)
++                                    withContext(Dispatchers.IO) {

@@ -1,0 +1,10 @@
++                                        contentResolver.openInputStream(uri)?.use { input ->
++                                            dest.outputStream().use { output -> input.copyTo(output) }
++                                        } ?: throw Exception("Cannot open selected file")
++                                    }
++                                    val v = com.saraai.offline.model.GgufValidator.validate(dest, expectedSha256 = null)
++                                    if (!v.ok) {
++                                        dest.delete()
++                                        downloadMsg = "Import fail: ${v.reason}"
++                                    } else {
++                                        PrefsStore.update(this@MainActivity) {

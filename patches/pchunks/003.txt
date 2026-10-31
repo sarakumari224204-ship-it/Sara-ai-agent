@@ -1,0 +1,11 @@
++                                            it.copy(modelPath = dest.absolutePath, modelName = name)
++                                        }
++                                        downloadMsg = "Imported: $name (${v.sizeBytes / (1024 * 1024)} MB). Not auto-connected."
++                                        downloadPct = 100
++                                        modelStatus = "Imported path saved. Press Load or Connect."
++                                    }
++                                } catch (t: Throwable) {
++                                    downloadMsg = "Import error: ${t.message}"
++                                }
++                            }
++                        }

@@ -1,0 +1,11 @@
+                        Column(Modifier.fillMaxSize().padding(12.dp).verticalScroll(rememberScrollState())) {
+                            Text("Models", style = MaterialTheme.typography.titleMedium)
+                            Text(modelStatus)
+-                            Text("Loaded: ${LlamaBridge.loaded()}")
++                            val loadedNow = LlamaBridge.loaded()
++                            Text("State — Loaded: $loadedNow")
++                            var savedPath by remember { mutableStateOf("") }
++                            LaunchedEffect(Unit) {
++                                try { savedPath = PrefsStore.read(this@MainActivity).modelPath } catch (_: Throwable) {}
++                            }
++                            if (savedPath.isNotBlank()) {
