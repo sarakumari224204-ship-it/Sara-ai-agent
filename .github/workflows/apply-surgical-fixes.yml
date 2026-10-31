@@ -14,13 +14,13 @@ jobs:
           fetch-depth: 0
       - name: Assemble patcher
         run: |
-          cat tools/pma_part1.py tools/pma_part2.py > tools/patch_mainactivity.py
+          cat tools/pma_part1.py tools/pma_gap.py tools/pma_part2.py > tools/patch_mainactivity.py
           wc -c tools/patch_mainactivity.py
           python3 -m py_compile tools/patch_mainactivity.py
       - name: Run surgical patch (abort on failure, no commit)
         run: |
+          set -e
           python3 tools/patch_mainactivity.py
-          test -f app/src/main/java/com/saraai/offline/MainActivity.kt
           grep -q "Cloud API / API Key" app/src/main/java/com/saraai/offline/MainActivity.kt
           grep -q "Pick GGUF" app/src/main/java/com/saraai/offline/MainActivity.kt
           grep -q "Memory / Knowledge" app/src/main/java/com/saraai/offline/MainActivity.kt
@@ -28,6 +28,8 @@ jobs:
           grep -q "Load / Use Local" app/src/main/java/com/saraai/offline/MainActivity.kt
           grep -q "error loading keys" app/src/main/java/com/saraai/offline/MainActivity.kt
           grep -q "Version 2.1.1" app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -q 'Text("Connect")' app/src/main/java/com/saraai/offline/MainActivity.kt
+          grep -q "isDownloaded" app/src/main/java/com/saraai/offline/MainActivity.kt
           echo "ALL MARKERS VERIFIED"
       - name: Commit only if verified
         run: |
